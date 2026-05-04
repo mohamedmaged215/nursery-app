@@ -433,8 +433,9 @@ export default function EmployeesPage() {
 
   // ── Summary stats for selected month ──────────────────────────────────────
   const stats = useMemo(() => {
+    const employeeIds = new Set(employees.map((e) => e.id));
     const monthSalaries = salaries.filter(
-      (s) => s.month === selMonth && s.year === selYear
+      (s) => s.month === selMonth && s.year === selYear && employeeIds.has(s.employeeId)
     );
     return {
       totalSalaries: monthSalaries.reduce((sum, s) => sum + s.amount, 0),

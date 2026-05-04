@@ -67,8 +67,12 @@ const ARABIC_MONTHS = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
 
-const EXPENSE_TYPE_LABELS: Record<Expense["type"], string> = {
-  rent: "إيجار", bus: "عربيات", other: "أخرى",
+const EXPENSE_TYPE_LABELS: Record<string, string> = {
+  salary:   "مرتبات",
+  supplies: "هوالك",
+  rent:     "إيجار",
+  bus:      "عربيات",
+  other:    "أخرى",
 };
 
 const ROLE_LABELS: Record<Employee["role"], string> = {
@@ -231,7 +235,10 @@ export default function ReportsPage() {
     const mExpenses = expenses.filter((e) => e.month === selMonth && e.year === selYear);
     const totalExpenses = mExpenses.reduce((s, e) => s + e.amount, 0);
 
-    const mSalaries = salaries.filter((s) => s.month === selMonth && s.year === selYear);
+    const empIds = new Set(Object.keys(employeesMap));
+    const mSalaries = salaries.filter(
+      (s) => s.month === selMonth && s.year === selYear && empIds.has(s.employeeId)
+    );
     const totalSalaries = mSalaries.reduce((s, sal) => s + sal.amount, 0);
 
     const netProfit = subscription + bus - totalExpenses - totalSalaries;
@@ -247,8 +254,8 @@ export default function ReportsPage() {
       }
     }
 
-    // Expenses by type
-    const expByType: Record<string, number> = { rent: 0, bus: 0, other: 0 };
+    // Expenses by type (new + backward-compat old types)
+    const expByType: Record<string, number> = { salary: 0, supplies: 0, rent: 0, bus: 0, other: 0 };
     for (const e of mExpenses) {
       expByType[e.type] = (expByType[e.type] ?? 0) + e.amount;
     }
@@ -279,7 +286,10 @@ export default function ReportsPage() {
       const mPmts = payments.filter((p) => p.date?.startsWith(prefix));
       const { subscription, bus } = splitRevenue(mPmts, studentsMap);
       const mExp = expenses.filter((e) => e.month === month && e.year === year);
-      const mSal = salaries.filter((s) => s.month === month && s.year === year);
+      const chartEmpIds = new Set(Object.keys(employeesMap));
+      const mSal = salaries.filter(
+        (s) => s.month === month && s.year === year && chartEmpIds.has(s.employeeId)
+      );
       const totalExp = mExp.reduce((s, e) => s + e.amount, 0);
       const totalSal = mSal.reduce((s, sal) => s + sal.amount, 0);
       const revenues = subscription + bus;
@@ -293,7 +303,7 @@ export default function ReportsPage() {
         isCurrent: month === selMonth && year === selYear,
       };
     });
-  }, [selMonth, selYear, payments, expenses, salaries, studentsMap]);
+  }, [selMonth, selYear, payments, expenses, salaries, studentsMap, employeesMap]);
 
   // ── Students with remaining balance ───────────────────────────────────────
   const studentsWithBalance = useMemo(
@@ -489,7 +499,7 @@ export default function ReportsPage() {
                   <p className="text-xs text-gray-400 text-center py-4">لا توجد مصاريف</p>
                 ) : (
                   <div className="space-y-3">
-                    {(["rent", "bus", "other"] as const).map((type) => {
+                    {(["salary", "supplies", "rent"] as const).map((type) => {
                       const amount = expByType[type] ?? 0;
                       const pct = totalExpenses > 0 ? Math.round((amount / totalExpenses) * 100) : 0;
                       return (

@@ -14,10 +14,18 @@ interface Expense {
   name: string;
   amount: number;
   date: string;
-  type: "rent" | "bus" | "other";
+  type: "salary" | "supplies" | "rent";
   month: number; // 0-indexed
   year: number;
   createdAt: string;
+}
+
+interface Student {
+  id: string;
+  type: "street" | "bus";
+  area: string;
+  busAmount: number;
+  status: "active" | "inactive";
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -27,16 +35,18 @@ const ARABIC_MONTHS = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
 
-const TYPE_LABELS: Record<Expense["type"], string> = {
-  rent:  "إيجار",
-  bus:   "عربيات",
-  other: "أخرى",
+const BUS_AREAS = ["شرق الكوبري", "البلدة", "العرب"] as const;
+
+const TYPE_LABELS: Record<string, string> = {
+  salary:   "مرتبات",
+  supplies: "هوالك",
+  rent:     "إيجار",
 };
 
-const TYPE_BADGE: Record<Expense["type"], string> = {
-  rent:  "bg-orange-100 text-orange-700",
-  bus:   "bg-blue-100   text-blue-700",
-  other: "bg-gray-100   text-gray-600",
+const TYPE_BADGE: Record<string, string> = {
+  salary:   "bg-purple-100 text-purple-700",
+  supplies: "bg-gray-100   text-gray-600",
+  rent:     "bg-orange-100 text-orange-700",
 };
 
 // ─── Firestore helpers ────────────────────────────────────────────────────────
@@ -44,6 +54,11 @@ const TYPE_BADGE: Record<Expense["type"], string> = {
 async function fetchExpenses(): Promise<Expense[]> {
   const snap = await getDocs(collection(db, "expenses"));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense));
+}
+
+async function fetchStudents(): Promise<Student[]> {
+  const snap = await getDocs(collection(db, "students"));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Student));
 }
 
 async function createExpense(data: Omit<Expense, "id">): Promise<string> {
@@ -81,7 +96,9 @@ function AddEditExpenseModal({
   const [name,   setName]   = useState(expense?.name ?? "");
   const [amount, setAmount] = useState(expense?.amount ? String(expense.amount) : "");
   const [date,   setDate]   = useState(expense?.date ?? todayStr);
-  const [type,   setType]   = useState<Expense["type"]>(expense?.type ?? "other");
+  const [type,   setType]   = useState<Expense["type"]>(
+    (expense?.type && expense.type in TYPE_LABELS) ? expense.type as Expense["type"] : "supplies"
+  );
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState("");
 
@@ -136,7 +153,7 @@ function AddEditExpenseModal({
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">النوع *</label>
             <div className="flex gap-2">
-              {(["rent", "bus", "other"] as const).map((t) => (
+              {(["salary", "supplies", "rent"] as const).map((t) => (
                 <button
                   key={t} type="button" onClick={() => setType(t)}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition border ${
@@ -250,6 +267,7 @@ export default function ExpensesPage() {
   const router = useRouter();
   const [authChecked, setAuthChecked]     = useState(false);
   const [expenses, setExpenses]           = useState<Expense[]>([]);
+  const [students, setStudents]           = useState<Student[]>([]);
   const [loading, setLoading]             = useState(true);
   const [showAdd, setShowAdd]             = useState(false);
   const [editing, setEditing]             = useState<Expense | null>(null);
@@ -271,38 +289,52 @@ export default function ExpensesPage() {
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!authChecked) return;
-    fetchExpenses().then((data) => {
-      setExpenses(data);
+    Promise.all([fetchExpenses(), fetchStudents()]).then(([e, s]) => {
+      setExpenses(e);
+      setStudents(s);
       setLoading(false);
     });
   }, [authChecked]);
 
-  // ── Month options — union of all expense months + current month ────────────
+  // ── Month options ──────────────────────────────────────────────────────────
   const monthOptions = useMemo(() => {
     const today = new Date();
     const seen = new Set<string>();
     seen.add(`${today.getFullYear()}-${today.getMonth()}`);
     for (const e of expenses) {
-      if (e.year != null && e.month != null) {
-        seen.add(`${e.year}-${e.month}`);
-      }
+      if (e.year != null && e.month != null) seen.add(`${e.year}-${e.month}`);
     }
     return Array.from(seen)
       .map((key) => { const [y, m] = key.split("-").map(Number); return { year: y, month: m }; })
       .sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month);
   }, [expenses]);
 
-  // ── Filtered expenses for selected month ──────────────────────────────────
+  // ── Filtered manual expenses for selected month ────────────────────────────
   const filtered = useMemo(
     () => expenses.filter((e) => e.month === selMonth && e.year === selYear),
     [expenses, selMonth, selYear]
   );
 
-  // ── Summary stats ──────────────────────────────────────────────────────────
   const stats = useMemo(() => ({
     total: filtered.reduce((sum, e) => sum + e.amount, 0),
     count: filtered.length,
   }), [filtered]);
+
+  // ── Bus expenses by area (live snapshot of active bus students) ────────────
+  const busExpenses = useMemo(() => {
+    return BUS_AREAS.map((area) => {
+      const areaStudents = students.filter(
+        (s) => s.status === "active" && s.type === "bus" && s.area === area
+      );
+      return {
+        area,
+        count: areaStudents.length,
+        total: areaStudents.reduce((sum, s) => sum + (s.busAmount || 0), 0),
+      };
+    });
+  }, [students]);
+
+  const busTotalExpense = busExpenses.reduce((sum, b) => sum + b.total, 0);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleExpenseSaved(expense: Expense) {
@@ -328,23 +360,22 @@ export default function ExpensesPage() {
     }
   }
 
-  // ── Spinner while auth resolves ────────────────────────────────────────────
   if (!authChecked) {
     return (
-      <div className="min-h-full flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-full">
+    <div className="min-h-screen">
       <Navbar />
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-8">
 
         {/* ── Page header ─────────────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">المصاريف</h2>
             <p className="text-sm text-gray-500 mt-0.5">تتبع وإدارة مصاريف الحضانة</p>
@@ -361,7 +392,7 @@ export default function ExpensesPage() {
         </div>
 
         {/* ── Month selector + summary cards ──────────────────────────────── */}
-        <div className="mb-8">
+        <div>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-gray-700">ملخص الشهر</h3>
             <select
@@ -382,7 +413,6 @@ export default function ExpensesPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            {/* عدد المصاريف */}
             <div className="bg-orange-50 rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
               <div className="bg-orange-100 text-orange-600 rounded-xl p-2 sm:p-3 shrink-0">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -396,7 +426,6 @@ export default function ExpensesPage() {
               </div>
             </div>
 
-            {/* إجمالي المصاريف */}
             <div className="bg-red-50 rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
               <div className="bg-red-100 text-red-600 rounded-xl p-2 sm:p-3 shrink-0">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -416,7 +445,7 @@ export default function ExpensesPage() {
           </div>
         </div>
 
-        {/* ── Expenses table ───────────────────────────────────────────────── */}
+        {/* ── Manual expenses table ────────────────────────────────────────── */}
         {loading ? (
           <div className="space-y-3">
             {[...Array(5)].map((_, i) => (
@@ -424,8 +453,8 @@ export default function ExpensesPage() {
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-20 text-gray-400">
-            <svg className="w-14 h-14 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border border-gray-200">
+            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
@@ -487,8 +516,6 @@ export default function ExpensesPage() {
                 </tbody>
               </table>
             </div>
-
-            {/* Footer: total for the filtered view */}
             <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between text-xs text-gray-500">
               <span>{filtered.length} مصروف</span>
               <span className="font-semibold text-red-700">
@@ -497,6 +524,60 @@ export default function ExpensesPage() {
             </div>
           </div>
         )}
+
+        {/* ── Bus expenses — auto section ──────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 bg-blue-50 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-blue-900">مصاريف العربيات (تلقائي)</h3>
+              <p className="text-xs text-blue-600 mt-0.5">محسوب من مبالغ عربيات الطلاب النشطين حالياً</p>
+            </div>
+            <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full">
+              قراءة فقط
+            </span>
+          </div>
+
+          {loading ? (
+            <div className="p-4 space-y-2">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="bg-gray-100 rounded-lg h-10 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-right">
+                  <th className="px-4 py-2.5 font-semibold text-gray-600 text-xs">المنطقة</th>
+                  <th className="px-4 py-2.5 font-semibold text-gray-600 text-xs">عدد الطلاب</th>
+                  <th className="px-4 py-2.5 font-semibold text-gray-600 text-xs">إجمالي العربيات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {busExpenses.map(({ area, count, total }) => (
+                  <tr key={area} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 text-gray-800 font-medium">{area}</td>
+                    <td className="px-4 py-2.5 text-gray-600">{count} طالب</td>
+                    <td className="px-4 py-2.5 font-semibold text-blue-700">
+                      {total.toLocaleString()} جنيه
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-gray-200 bg-blue-50">
+                  <td className="px-4 py-2.5 font-semibold text-gray-700 text-sm">
+                    الإجمالي ({busExpenses.reduce((s, b) => s + b.count, 0)} طالب)
+                  </td>
+                  <td />
+                  <td className="px-4 py-2.5 font-bold text-blue-700 text-sm">
+                    {busTotalExpense.toLocaleString()} جنيه
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+
       </main>
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}

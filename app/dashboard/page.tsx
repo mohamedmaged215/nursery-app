@@ -151,7 +151,9 @@ export default function DashboardPage() {
 
     const netProfit = collected - totalExpenses;
 
-    return { totalActiveStudents, paymentCount, collected, remaining, totalExpenses, netProfit };
+    const expiredCount = students.filter((s) => s.status === "inactive").length;
+
+    return { totalActiveStudents, paymentCount, collected, remaining, totalExpenses, netProfit, expiredCount };
   }, [students, payments, expenses, selectedYear, selectedMonth]);
 
   if (!authChecked) {
@@ -193,8 +195,8 @@ export default function DashboardPage() {
         {/* ── Cards ───────────────────────────────────────────────────────── */}
         {loading ? (
           <div className="grid grid-cols-2 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="bg-gray-100 rounded-2xl h-24 animate-pulse" />
+            {[...Array(7)].map((_, i) => (
+              <div key={i} className={`bg-gray-100 rounded-2xl h-24 animate-pulse ${i === 6 ? "col-span-2" : ""}`} />
             ))}
           </div>
         ) : (
@@ -231,6 +233,14 @@ export default function DashboardPage() {
               value={stats.netProfit.toLocaleString()}
               color={stats.netProfit >= 0 ? "#15803d" : "#dc2626"}
             />
+            <div className="col-span-2">
+              <StatCard
+                label={`اشتراكات منتهية — يحتاجون تجديد`}
+                value={`${stats.expiredCount} طالب`}
+                color="#b45309"
+                href="/students"
+              />
+            </div>
           </div>
         )}
       </main>

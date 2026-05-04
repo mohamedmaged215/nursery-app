@@ -21,12 +21,20 @@ interface Student {
   paidAmount: number;
   remainingAmount: number;
   status: "active" | "inactive";
+  startDate: string;
+  endDate: string;
   createdAt: string;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DEFAULT_AREAS = ["شرق الكوبري", "البلدة", "العرب"];
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 // ─── Firestore helpers ────────────────────────────────────────────────────────
 
@@ -40,16 +48,13 @@ async function createStudent(data: Omit<Student, "id">): Promise<string> {
   return ref.id;
 }
 
-async function softDeleteStudent(id: string): Promise<void> {
-  await updateDoc(doc(db, "students", id), { status: "inactive" });
-}
-
 async function renewStudent(
   id: string,
   subscriptionAmount: number,
   busAmount: number,
   type: "street" | "bus"
 ): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
   const total = subscriptionAmount + (type === "bus" ? busAmount : 0);
   await updateDoc(doc(db, "students", id), {
     status: "active",
@@ -58,6 +63,8 @@ async function renewStudent(
     totalAmount: total,
     paidAmount: 0,
     remainingAmount: total,
+    startDate: today,
+    endDate: addDays(today, 30),
   });
 }
 
@@ -73,6 +80,22 @@ async function registerPayment(
     paidAmount: newPaid,
     remainingAmount: newRemaining,
   });
+}
+
+// Batch-expire students whose endDate has passed
+async function checkAndExpireStudents(students: Student[]): Promise<Student[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const toExpire = students.filter(
+    (s) => s.status === "active" && s.endDate && s.endDate <= today
+  );
+  if (toExpire.length === 0) return students;
+  await Promise.all(
+    toExpire.map((s) => updateDoc(doc(db, "students", s.id), { status: "inactive" }))
+  );
+  const expiredIds = new Set(toExpire.map((s) => s.id));
+  return students.map((s) =>
+    expiredIds.has(s.id) ? { ...s, status: "inactive" as const } : s
+  );
 }
 
 // ─── Add Student Modal ────────────────────────────────────────────────────────
@@ -101,20 +124,12 @@ function AddStudentModal({
     setError("");
     const sub = Number(subscriptionAmount);
     const bus = type === "bus" ? Number(busAmount) || 0 : 0;
-    if (!name.trim() || !phone.trim()) {
-      setError("يرجى ملء جميع الحقول المطلوبة");
-      return;
-    }
-    if (type === "bus" && !effectiveArea.trim()) {
-      setError("يرجى تحديد المنطقة");
-      return;
-    }
-    if (isNaN(sub) || sub <= 0) {
-      setError("يرجى إدخال مبلغ اشتراك صحيح");
-      return;
-    }
+    if (!name.trim() || !phone.trim()) { setError("يرجى ملء جميع الحقول المطلوبة"); return; }
+    if (type === "bus" && !effectiveArea.trim()) { setError("يرجى تحديد المنطقة"); return; }
+    if (isNaN(sub) || sub <= 0) { setError("يرجى إدخال مبلغ اشتراك صحيح"); return; }
     setSaving(true);
     try {
+      const today = new Date().toISOString().slice(0, 10);
       const total = sub + bus;
       const data: Omit<Student, "id"> = {
         name: name.trim(),
@@ -127,7 +142,9 @@ function AddStudentModal({
         paidAmount: 0,
         remainingAmount: total,
         status: "active",
-        createdAt: new Date().toISOString().slice(0, 10),
+        startDate: today,
+        endDate: addDays(today, 30),
+        createdAt: today,
       };
       const id = await createStudent(data);
       onSave({ id, ...data });
@@ -175,7 +192,7 @@ function AddStudentModal({
                   className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition border ${
                     type === t ? "bg-[#1976d2] text-white border-[#1976d2]" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                   }`}>
-                  {t === "street" ? "شارع" : "عربية"}
+                  {t === "street" ? "بدون مواصلات" : "عربية"}
                 </button>
               ))}
             </div>
@@ -213,10 +230,10 @@ function AddStudentModal({
 
           {subscriptionAmount && (
             <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-900">
-              الإجمالي:{" "}
-              <span className="font-bold">
+              <span>الإجمالي: <span className="font-bold">
                 {((Number(subscriptionAmount) || 0) + (type === "bus" ? Number(busAmount) || 0 : 0)).toLocaleString()} جنيه
-              </span>
+              </span></span>
+              <p className="text-xs text-blue-600 mt-1">ينتهي الاشتراك بعد 30 يوم</p>
             </div>
           )}
 
@@ -355,7 +372,7 @@ function RenewalModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (isNaN(sub) || sub <= 0) { setError("يرجى إدخال مبلغ اشتراك صحيح"); return; }
+    if (sub <= 0) { setError("يرجى إدخال مبلغ اشتراك صحيح"); return; }
     setSaving(true);
     try {
       await renewStudent(student.id, sub, bus, student.type);
@@ -383,11 +400,11 @@ function RenewalModal({
           </button>
         </div>
 
-        {/* Student info */}
         <div className="bg-blue-50 rounded-xl px-4 py-3 mb-5">
           <p className="text-sm font-semibold text-gray-900">{student.name}</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {student.type === "bus" ? `عربية · ${student.area}` : "شارع"}
+            {student.type === "bus" ? `عربية · ${student.area}` : "بدون مواصلات"}
+            {student.endDate ? ` · انتهى: ${student.endDate}` : ""}
           </p>
         </div>
 
@@ -411,7 +428,9 @@ function RenewalModal({
           {sub > 0 && (
             <div className="bg-green-50 rounded-xl px-4 py-3 text-sm text-green-900">
               الإجمالي الجديد: <span className="font-bold">{total.toLocaleString()} جنيه</span>
-              <p className="text-xs text-green-700 mt-0.5">سيتم إعادة تعيين المدفوع إلى 0</p>
+              <p className="text-xs text-green-700 mt-0.5">
+                سيتم تفعيل الاشتراك لمدة 30 يوم · ينتهي {addDays(new Date().toISOString().slice(0, 10), 30)}
+              </p>
             </div>
           )}
 
@@ -435,50 +454,6 @@ function RenewalModal({
   );
 }
 
-// ─── Delete Confirmation Modal ─────────────────────────────────────────────────
-
-function DeleteConfirmModal({
-  student,
-  loading,
-  onConfirm,
-  onClose,
-}: {
-  student: Student;
-  loading: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
-        <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-          <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        </div>
-        <h3 className="text-lg font-bold text-gray-900 mb-2">تأكيد إنهاء الاشتراك</h3>
-        <p className="text-sm text-gray-500 mb-6">
-          هل تريد إنهاء اشتراك{" "}
-          <span className="font-semibold text-gray-900">{student.name}</span>؟
-          <br />
-          يمكن تجديد الاشتراك لاحقاً من تبويب &quot;اشتراكات منتهية&quot;
-        </p>
-        <div className="flex gap-3">
-          <button onClick={onClose}
-            className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition">
-            إلغاء
-          </button>
-          <button onClick={onConfirm} disabled={loading}
-            className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 disabled:opacity-60 transition">
-            {loading ? "..." : "إنهاء الاشتراك"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function StudentsPage() {
@@ -491,8 +466,6 @@ export default function StudentsPage() {
   const [showAddModal, setShowAddModal]       = useState(false);
   const [payingStudent, setPayingStudent]     = useState<Student | null>(null);
   const [renewingStudent, setRenewingStudent] = useState<Student | null>(null);
-  const [deletingStudent, setDeletingStudent] = useState<Student | null>(null);
-  const [actionLoading, setActionLoading]     = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -504,8 +477,9 @@ export default function StudentsPage() {
 
   useEffect(() => {
     if (!authChecked) return;
-    fetchStudents().then((data) => {
-      setStudents(data);
+    fetchStudents().then(async (data) => {
+      const updated = await checkAndExpireStudents(data);
+      setStudents(updated);
       setLoading(false);
     });
   }, [authChecked]);
@@ -536,26 +510,15 @@ export default function StudentsPage() {
   }
 
   function handleRenewed(id: string, sub: number, bus: number, total: number) {
+    const today = new Date().toISOString().slice(0, 10);
     setStudents((prev) =>
       prev.map((s) =>
         s.id === id
-          ? { ...s, status: "active", subscriptionAmount: sub, busAmount: bus, totalAmount: total, paidAmount: 0, remainingAmount: total }
+          ? { ...s, status: "active", subscriptionAmount: sub, busAmount: bus, totalAmount: total,
+              paidAmount: 0, remainingAmount: total, startDate: today, endDate: addDays(today, 30) }
           : s
       )
     );
-  }
-
-  async function handleDelete(student: Student) {
-    setActionLoading(student.id);
-    try {
-      await softDeleteStudent(student.id);
-      setStudents((prev) =>
-        prev.map((s) => (s.id === student.id ? { ...s, status: "inactive" } : s))
-      );
-    } finally {
-      setActionLoading(null);
-      setDeletingStudent(null);
-    }
   }
 
   if (!authChecked) {
@@ -632,7 +595,7 @@ export default function StudentsPage() {
                 d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             <p className="text-sm font-medium">
-              {search ? "لا توجد نتائج للبحث" : tab === "inactive" ? "لا توجد اشتراكات منتهية" : "لا يوجد طلاب"}
+              {search ? "لا توجد نتائج للبحث" : tab === "inactive" ? "لا توجد اشتراكات منتهية" : "لا يوجد طلاب نشطين"}
             </p>
           </div>
         ) : (
@@ -649,6 +612,9 @@ export default function StudentsPage() {
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">مبلغ العربية</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المدفوع</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الباقي</th>
+                    {tab === "active" && (
+                      <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">ينتهي</th>
+                    )}
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">إجراءات</th>
                   </tr>
                 </thead>
@@ -656,15 +622,18 @@ export default function StudentsPage() {
                   {filtered.map((student) => {
                     const waMsg = `السلام عليكم مع حضرتك إدارة الحضانة\nبنفكركم إن اشتراك الطفل ${student.name} انتهى\nبرجاء تجديد الاشتراك\nمع تحيات إدارة حضانة شرق الكوبري`;
                     const waUrl = `https://wa.me/2${student.phone}?text=${encodeURIComponent(waMsg)}`;
+                    const today = new Date().toISOString().slice(0, 10);
+                    const expiringSoon = student.endDate && student.endDate > today &&
+                      student.endDate <= addDays(today, 5);
                     return (
-                      <tr key={student.id} className={`hover:bg-gray-50 transition ${student.status === "inactive" ? "opacity-80" : ""}`}>
+                      <tr key={student.id} className={`hover:bg-gray-50 transition ${student.status === "inactive" ? "opacity-75" : ""}`}>
                         <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{student.name}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap" dir="ltr">{student.phone}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             student.type === "bus" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
                           }`}>
-                            {student.type === "bus" ? "عربية" : "شارع"}
+                            {student.type === "bus" ? "عربية" : "بدون مواصلات"}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
@@ -684,6 +653,16 @@ export default function StudentsPage() {
                             {student.remainingAmount.toLocaleString()}
                           </span>
                         </td>
+                        {tab === "active" && (
+                          <td className="px-4 py-3 whitespace-nowrap text-xs">
+                            {student.endDate ? (
+                              <span className={expiringSoon ? "text-red-600 font-semibold" : "text-gray-500"}>
+                                {student.endDate}
+                                {expiringSoon && " ⚠"}
+                              </span>
+                            ) : "—"}
+                          </td>
+                        )}
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
                             {student.status === "active" ? (
@@ -698,12 +677,6 @@ export default function StudentsPage() {
                                   className="px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition">
                                   واتساب
                                 </a>
-                                <button
-                                  onClick={() => setDeletingStudent(student)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition"
-                                >
-                                  إنهاء
-                                </button>
                               </>
                             ) : (
                               <>
@@ -752,15 +725,6 @@ export default function StudentsPage() {
           student={renewingStudent}
           onClose={() => setRenewingStudent(null)}
           onRenewed={handleRenewed}
-        />
-      )}
-
-      {deletingStudent && (
-        <DeleteConfirmModal
-          student={deletingStudent}
-          loading={actionLoading === deletingStudent.id}
-          onConfirm={() => handleDelete(deletingStudent)}
-          onClose={() => setDeletingStudent(null)}
         />
       )}
     </div>
