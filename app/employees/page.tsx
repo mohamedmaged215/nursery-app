@@ -22,9 +22,17 @@ interface Salary {
   id: string;
   employeeId: string;
   amount: number;
-  month: number; // 0-indexed (0 = January)
+  month: number; // 0-indexed
   year: number;
   date: string;
+}
+
+interface Student {
+  id: string;
+  type: "street" | "bus";
+  area: string;
+  busAmount: number;
+  status: "active" | "inactive";
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -64,13 +72,14 @@ async function updateEmployee(id: string, data: Partial<Omit<Employee, "id">>): 
   await updateDoc(doc(db, "employees", id), data);
 }
 
-async function hardDeleteEmployee(id: string): Promise<void> {
-  await deleteDoc(doc(db, "employees", id));
-}
-
 async function fetchSalaries(): Promise<Salary[]> {
   const snap = await getDocs(collection(db, "salaries"));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Salary));
+}
+
+async function fetchStudents(): Promise<Student[]> {
+  const snap = await getDocs(collection(db, "students"));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Student));
 }
 
 async function createSalary(data: Omit<Salary, "id">): Promise<string> {
@@ -147,7 +156,6 @@ function AddEditEmployeeModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Name */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">اسم الموظف *</label>
             <input
@@ -156,7 +164,6 @@ function AddEditEmployeeModal({
             />
           </div>
 
-          {/* Role toggle */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">الوظيفة *</label>
             <div className="flex gap-2">
@@ -175,7 +182,6 @@ function AddEditEmployeeModal({
             </div>
           </div>
 
-          {/* Area — only for drivers */}
           {role === "driver" && (
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">المنطقة *</label>
@@ -185,7 +191,6 @@ function AddEditEmployeeModal({
             </div>
           )}
 
-          {/* Monthly salary */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">المرتب الشهري (جنيه) *</label>
             <input
@@ -274,7 +279,6 @@ function SalaryModal({
           </button>
         </div>
 
-        {/* Employee info card */}
         <div className="bg-gray-50 rounded-xl px-4 py-3 mb-5">
           <p className="text-sm font-semibold text-gray-900">{employee.name}</p>
           <p className="text-xs text-gray-500 mt-0.5">
@@ -285,7 +289,6 @@ function SalaryModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Month / Year selector */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">الشهر</label>
             <div className="flex gap-2">
@@ -304,7 +307,6 @@ function SalaryModal({
             </div>
           </div>
 
-          {/* Amount */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">المبلغ (جنيه)</label>
             <input
@@ -362,7 +364,7 @@ function DeleteConfirmModal({
           هل تريد حذف الموظف{" "}
           <span className="font-semibold text-gray-900">{employee.name}</span>؟
           <br />
-          لا يمكن التراجع عن هذا الإجراء.
+          سيتم حذف جميع سجلات مرتباته أيضاً.
         </p>
         <div className="flex gap-3">
           <button onClick={onClose}
@@ -386,6 +388,7 @@ export default function EmployeesPage() {
   const [authChecked, setAuthChecked]     = useState(false);
   const [employees, setEmployees]         = useState<Employee[]>([]);
   const [salaries, setSalaries]           = useState<Salary[]>([]);
+  const [students, setStudents]           = useState<Student[]>([]);
   const [loading, setLoading]             = useState(true);
   const [showAdd, setShowAdd]             = useState(false);
   const [editing, setEditing]             = useState<Employee | null>(null);
@@ -393,7 +396,6 @@ export default function EmployeesPage() {
   const [deleting, setDeleting]           = useState<Employee | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Month selector for summary (initialised from current date inside useMemo below)
   const [selMonth, setSelMonth] = useState(() => new Date().getMonth());
   const [selYear,  setSelYear]  = useState(() => new Date().getFullYear());
 
@@ -409,14 +411,15 @@ export default function EmployeesPage() {
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!authChecked) return;
-    Promise.all([fetchEmployees(), fetchSalaries()]).then(([e, s]) => {
+    Promise.all([fetchEmployees(), fetchSalaries(), fetchStudents()]).then(([e, s, st]) => {
       setEmployees(e);
       setSalaries(s);
+      setStudents(st);
       setLoading(false);
     });
   }, [authChecked]);
 
-  // ── Month options (last 13 months) ─────────────────────────────────────────
+  // ── Month options ──────────────────────────────────────────────────────────
   const monthOptions = useMemo(() => {
     const today = new Date();
     const opts: { month: number; year: number }[] = [];
@@ -439,6 +442,22 @@ export default function EmployeesPage() {
     };
   }, [salaries, employees, selMonth, selYear]);
 
+  // ── Driver stats: bus collected vs salary paid ─────────────────────────────
+  const driverStats = useMemo(() => {
+    const result: Record<string, { busCollected: number; salariedThisMonth: number }> = {};
+    for (const emp of employees) {
+      if (emp.role !== "driver") continue;
+      const busCollected = students
+        .filter((s) => s.status === "active" && s.type === "bus" && s.area === emp.area)
+        .reduce((sum, s) => sum + (s.busAmount || 0), 0);
+      const salariedThisMonth = salaries
+        .filter((s) => s.employeeId === emp.id && s.month === selMonth && s.year === selYear)
+        .reduce((sum, s) => sum + s.amount, 0);
+      result[emp.id] = { busCollected, salariedThisMonth };
+    }
+    return result;
+  }, [employees, students, salaries, selMonth, selYear]);
+
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleEmployeeSaved(emp: Employee) {
     setEmployees((prev) => {
@@ -459,8 +478,13 @@ export default function EmployeesPage() {
   async function handleDelete(emp: Employee) {
     setActionLoading(emp.id);
     try {
-      await hardDeleteEmployee(emp.id);
+      const empSalaryDocs = salaries.filter((s) => s.employeeId === emp.id);
+      await Promise.all([
+        deleteDoc(doc(db, "employees", emp.id)),
+        ...empSalaryDocs.map((s) => deleteDoc(doc(db, "salaries", s.id))),
+      ]);
       setEmployees((prev) => prev.filter((e) => e.id !== emp.id));
+      setSalaries((prev) => prev.filter((s) => s.employeeId !== emp.id));
     } finally {
       setActionLoading(null);
       setDeleting(null);
@@ -470,14 +494,14 @@ export default function EmployeesPage() {
   // ── Loading / auth spinner ─────────────────────────────────────────────────
   if (!authChecked) {
     return (
-      <div className="min-h-full flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-full">
+    <div className="min-h-screen">
       <Navbar />
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -521,7 +545,6 @@ export default function EmployeesPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            {/* Total employees */}
             <div className="bg-blue-50 rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
               <div className="bg-blue-100 text-blue-600 rounded-xl p-2 sm:p-3 shrink-0">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -535,7 +558,6 @@ export default function EmployeesPage() {
               </div>
             </div>
 
-            {/* Total salaries for selected month */}
             <div className="bg-red-50 rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
               <div className="bg-red-100 text-red-600 rounded-xl p-2 sm:p-3 shrink-0">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -584,46 +606,83 @@ export default function EmployeesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {employees.map((emp) => (
-                    <tr key={emp.id} className="hover:bg-gray-50 transition">
-                      <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                        {emp.name}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGE[emp.role]}`}>
-                          {ROLE_LABELS[emp.role]}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                        {emp.role === "driver" && emp.area ? emp.area : "—"}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                        {emp.monthlySalary.toLocaleString()} جنيه
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setSalaryFor(emp)}
-                            className="px-2.5 py-1.5 rounded-lg bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100 transition"
-                          >
-                            تسجيل مرتب
-                          </button>
-                          <button
-                            onClick={() => setEditing(emp)}
-                            className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition"
-                          >
-                            تعديل
-                          </button>
-                          <button
-                            onClick={() => setDeleting(emp)}
-                            className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition"
-                          >
-                            حذف
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {employees.map((emp) => {
+                    const ds = driverStats[emp.id];
+                    const diff = ds ? ds.busCollected - ds.salariedThisMonth : 0;
+                    return (
+                      <>
+                        <tr key={emp.id} className="hover:bg-gray-50 transition">
+                          <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                            {emp.name}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGE[emp.role]}`}>
+                              {ROLE_LABELS[emp.role]}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                            {emp.role === "driver" && emp.area ? emp.area : "—"}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
+                            {emp.monthlySalary.toLocaleString()} جنيه
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => setSalaryFor(emp)}
+                                className="px-2.5 py-1.5 rounded-lg bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100 transition"
+                              >
+                                تسجيل مرتب
+                              </button>
+                              <button
+                                onClick={() => setEditing(emp)}
+                                className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition"
+                              >
+                                تعديل
+                              </button>
+                              <button
+                                onClick={() => setDeleting(emp)}
+                                className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition"
+                              >
+                                حذف
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* ── Driver salary split row ────────────────────── */}
+                        {emp.role === "driver" && ds && (
+                          <tr key={`${emp.id}-driver`} className="bg-blue-50/40 border-b border-blue-100">
+                            <td colSpan={5} className="px-4 py-2.5">
+                              <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+                                <span>
+                                  <span className="text-gray-500">محصل من طلاب {emp.area}:</span>
+                                  <span className="font-bold text-blue-700 mr-1">
+                                    {ds.busCollected.toLocaleString()} ج
+                                  </span>
+                                </span>
+                                <span>
+                                  <span className="text-gray-500">المرتب المدفوع ({ARABIC_MONTHS[selMonth]}):</span>
+                                  <span className="font-bold text-red-700 mr-1">
+                                    {ds.salariedThisMonth.toLocaleString()} ج
+                                  </span>
+                                </span>
+                                <span>
+                                  <span className="text-gray-500">الفرق:</span>
+                                  <span className={`font-bold mr-1 ${diff >= 0 ? "text-green-700" : "text-red-700"}`}>
+                                    {diff >= 0 ? "+" : ""}{diff.toLocaleString()} ج
+                                  </span>
+                                  <span className={`font-medium ${diff >= 0 ? "text-green-600" : "text-red-600"}`}>
+                                    ({diff >= 0 ? "ربح" : "خسارة"} على العربية)
+                                  </span>
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
