@@ -220,6 +220,94 @@ function AddEditEmployeeModal({
   );
 }
 
+// ─── Employee Details Modal ───────────────────────────────────────────────────
+
+function EmployeeDetailsModal({
+  employee,
+  salaries,
+  onClose,
+}: {
+  employee: Employee;
+  salaries: Salary[];
+  onClose: () => void;
+}) {
+  const empSalaries = useMemo(
+    () => salaries
+      .filter((s) => s.employeeId === employee.id)
+      .sort((a, b) => {
+        if (b.year !== a.year) return b.year - a.year;
+        return b.month - a.month;
+      }),
+    [salaries, employee.id]
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 py-6 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 my-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-bold text-gray-900">تفاصيل الموظف</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Employee info */}
+        <div className="bg-gray-50 rounded-xl px-4 py-4 mb-5 space-y-2">
+          <p className="text-base font-bold text-gray-900">{employee.name}</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+            <span className="text-gray-500">الوظيفة</span>
+            <span className="font-medium text-gray-700">{ROLE_LABELS[employee.role]}</span>
+            {employee.role === "driver" && employee.area && <>
+              <span className="text-gray-500">المنطقة</span>
+              <span className="font-medium text-gray-700">{employee.area}</span>
+            </>}
+            <span className="text-gray-500">المرتب الشهري</span>
+            <span className="font-medium text-gray-700">{employee.monthlySalary.toLocaleString()} ج</span>
+            <span className="text-gray-500">تاريخ الإضافة</span>
+            <span className="font-medium text-gray-700">{employee.createdAt || "—"}</span>
+          </div>
+        </div>
+
+        {/* Salary history */}
+        <h3 className="text-sm font-bold text-gray-700 mb-3">سجل المرتبات المدفوعة</h3>
+        {empSalaries.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">لا توجد مرتبات مسجلة</p>
+        ) : (
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-3 py-2 font-semibold text-gray-600 text-right">الشهر</th>
+                  <th className="px-3 py-2 font-semibold text-gray-600 text-right">تاريخ الدفع</th>
+                  <th className="px-3 py-2 font-semibold text-gray-600 text-right">المبلغ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {empSalaries.map((s) => (
+                  <tr key={s.id}>
+                    <td className="px-3 py-2 text-gray-700 font-medium">
+                      {ARABIC_MONTHS[s.month]} {s.year}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500">{s.date}</td>
+                    <td className="px-3 py-2 font-semibold text-green-700">{s.amount.toLocaleString()} ج</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <button onClick={onClose}
+          className="mt-5 w-full py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition">
+          إغلاق
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Salary Modal ─────────────────────────────────────────────────────────────
 
 function SalaryModal({
@@ -392,6 +480,7 @@ export default function EmployeesPage() {
   const [loading, setLoading]             = useState(true);
   const [showAdd, setShowAdd]             = useState(false);
   const [editing, setEditing]             = useState<Employee | null>(null);
+  const [viewing, setViewing]             = useState<Employee | null>(null);
   const [salaryFor, setSalaryFor]         = useState<Employee | null>(null);
   const [deleting, setDeleting]           = useState<Employee | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -442,6 +531,18 @@ export default function EmployeesPage() {
       employeeCount: employees.length,
     };
   }, [salaries, employees, selMonth, selYear]);
+
+  // ── Per-employee salary tracking for selected month ────────────────────────
+  const empSalaryMap = useMemo(() => {
+    const map: Record<string, { paid: number }> = {};
+    for (const emp of employees) {
+      const paid = salaries
+        .filter((s) => s.employeeId === emp.id && s.month === selMonth && s.year === selYear)
+        .reduce((sum, s) => sum + s.amount, 0);
+      map[emp.id] = { paid };
+    }
+    return map;
+  }, [employees, salaries, selMonth, selYear]);
 
   // ── Driver stats: bus collected vs salary paid ─────────────────────────────
   const driverStats = useMemo(() => {
@@ -596,13 +697,15 @@ export default function EmployeesPage() {
         ) : (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[700px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-right">
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الاسم</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الوظيفة</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المنطقة</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المرتب الشهري</th>
+                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المرتب المستحق</th>
+                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المدفوع</th>
+                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المتبقي</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">إجراءات</th>
                   </tr>
                 </thead>
@@ -610,11 +713,19 @@ export default function EmployeesPage() {
                   {employees.map((emp) => {
                     const ds = driverStats[emp.id];
                     const diff = ds ? ds.busCollected - ds.salariedThisMonth : 0;
+                    const empPaid = empSalaryMap[emp.id]?.paid ?? 0;
+                    const empRemaining = Math.max(0, emp.monthlySalary - empPaid);
+                    const isComplete = empRemaining === 0;
                     return (
                       <>
                         <tr key={emp.id} className="hover:bg-gray-50 transition">
-                          <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                            {emp.name}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <button
+                              onClick={() => setViewing(emp)}
+                              className="font-medium text-[#1976d2] hover:underline text-right"
+                            >
+                              {emp.name}
+                            </button>
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGE[emp.role]}`}>
@@ -625,7 +736,19 @@ export default function EmployeesPage() {
                             {emp.role === "driver" && emp.area ? emp.area : "—"}
                           </td>
                           <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                            {emp.monthlySalary.toLocaleString()} جنيه
+                            {emp.monthlySalary.toLocaleString()} ج
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="font-medium text-green-700">{empPaid.toLocaleString()} ج</span>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {isComplete ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                                مكتمل
+                              </span>
+                            ) : (
+                              <span className="font-semibold text-red-600">{empRemaining.toLocaleString()} ج</span>
+                            )}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
                             <div className="flex items-center gap-1.5">
@@ -654,7 +777,7 @@ export default function EmployeesPage() {
                         {/* ── Driver salary split row ────────────────────── */}
                         {emp.role === "driver" && ds && (
                           <tr key={`${emp.id}-driver`} className="bg-blue-50/40 border-b border-blue-100">
-                            <td colSpan={5} className="px-4 py-2.5">
+                            <td colSpan={7} className="px-4 py-2.5">
                               <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
                                 <span>
                                   <span className="text-gray-500">محصل من طلاب {emp.area}:</span>
@@ -707,6 +830,14 @@ export default function EmployeesPage() {
           employee={editing}
           onClose={() => setEditing(null)}
           onSave={(emp) => { handleEmployeeSaved(emp); setEditing(null); }}
+        />
+      )}
+
+      {viewing && (
+        <EmployeeDetailsModal
+          employee={viewing}
+          salaries={salaries}
+          onClose={() => setViewing(null)}
         />
       )}
 

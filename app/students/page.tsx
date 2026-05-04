@@ -26,6 +26,13 @@ interface Student {
   createdAt: string;
 }
 
+interface Payment {
+  id: string;
+  studentId: string;
+  amount: number;
+  date: string;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const DEFAULT_AREAS = ["شرق الكوبري", "البلدة", "العرب"];
@@ -46,6 +53,10 @@ async function fetchStudents(): Promise<Student[]> {
 async function createStudent(data: Omit<Student, "id">): Promise<string> {
   const ref = await addDoc(collection(db, "students"), data);
   return ref.id;
+}
+
+async function saveEditStudent(id: string, patch: Partial<Omit<Student, "id">>): Promise<void> {
+  await updateDoc(doc(db, "students", id), patch);
 }
 
 async function renewStudent(
@@ -90,7 +101,6 @@ async function deleteStudentWithPayments(studentId: string): Promise<void> {
   ]);
 }
 
-// Batch-expire students whose endDate has passed
 async function checkAndExpireStudents(students: Student[]): Promise<Student[]> {
   const today = new Date().toISOString().slice(0, 10);
   const toExpire = students.filter(
@@ -106,24 +116,43 @@ async function checkAndExpireStudents(students: Student[]): Promise<Student[]> {
   );
 }
 
-// ─── Add Student Modal ────────────────────────────────────────────────────────
+// ─── Shared input class ───────────────────────────────────────────────────────
 
-function AddStudentModal({
+const inputCls =
+  "w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-gray-50 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition";
+
+// ─── Add / Edit Student Modal ─────────────────────────────────────────────────
+
+function AddEditStudentModal({
+  student,
   onClose,
-  onSave,
+  onSaved,
 }: {
+  student?: Student;
   onClose: () => void;
-  onSave: (student: Student) => void;
+  onSaved: (student: Student) => void;
 }) {
+  const isEdit = !!student;
   const todayStr = new Date().toISOString().slice(0, 10);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [type, setType] = useState<"street" | "bus">("street");
-  const [area, setArea] = useState(DEFAULT_AREAS[0]);
-  const [customArea, setCustomArea] = useState("");
-  const [subscriptionAmount, setSubscriptionAmount] = useState("");
-  const [busAmount, setBusAmount] = useState("");
-  const [startDate, setStartDate] = useState(todayStr);
+
+  const [name, setName] = useState(student?.name ?? "");
+  const [phone, setPhone] = useState(student?.phone ?? "");
+  const [type, setType] = useState<"street" | "bus">(student?.type ?? "street");
+  const [area, setArea] = useState(() => {
+    if (!student?.area) return DEFAULT_AREAS[0];
+    return DEFAULT_AREAS.includes(student.area) ? student.area : "__custom__";
+  });
+  const [customArea, setCustomArea] = useState(() => {
+    if (!student?.area || DEFAULT_AREAS.includes(student.area)) return "";
+    return student.area;
+  });
+  const [subscriptionAmount, setSubscriptionAmount] = useState(
+    student?.subscriptionAmount ? String(student.subscriptionAmount) : ""
+  );
+  const [busAmount, setBusAmount] = useState(
+    student?.busAmount ? String(student.busAmount) : ""
+  );
+  const [startDate, setStartDate] = useState(student?.startDate ?? todayStr);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -140,23 +169,40 @@ function AddStudentModal({
     setSaving(true);
     try {
       const total = sub + bus;
-      const data: Omit<Student, "id"> = {
-        name: name.trim(),
-        phone: phone.trim(),
-        type,
-        area: type === "bus" ? effectiveArea.trim() : "",
-        subscriptionAmount: sub,
-        busAmount: bus,
-        totalAmount: total,
-        paidAmount: 0,
-        remainingAmount: total,
-        status: "active",
-        startDate,
-        endDate: addDays(startDate, 30),
-        createdAt: new Date().toISOString().slice(0, 10),
-      };
-      const id = await createStudent(data);
-      onSave({ id, ...data });
+      if (isEdit && student) {
+        const paid = student.paidAmount;
+        const remaining = Math.max(0, total - paid);
+        const patch = {
+          name: name.trim(),
+          phone: phone.trim(),
+          type,
+          area: type === "bus" ? effectiveArea.trim() : "",
+          subscriptionAmount: sub,
+          busAmount: bus,
+          totalAmount: total,
+          remainingAmount: remaining,
+        };
+        await saveEditStudent(student.id, patch);
+        onSaved({ ...student, ...patch });
+      } else {
+        const data: Omit<Student, "id"> = {
+          name: name.trim(),
+          phone: phone.trim(),
+          type,
+          area: type === "bus" ? effectiveArea.trim() : "",
+          subscriptionAmount: sub,
+          busAmount: bus,
+          totalAmount: total,
+          paidAmount: 0,
+          remainingAmount: total,
+          status: "active",
+          startDate,
+          endDate: addDays(startDate, 30),
+          createdAt: todayStr,
+        };
+        const id = await createStudent(data);
+        onSaved({ id, ...data });
+      }
       onClose();
     } catch {
       setError("حدث خطأ أثناء الحفظ. حاول مرة أخرى.");
@@ -165,14 +211,13 @@ function AddStudentModal({
     }
   }
 
-  const inputCls =
-    "w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-gray-50 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition";
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 my-auto">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 py-6 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 my-auto max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-bold text-gray-900">إضافة طالب جديد</h2>
+          <h2 className="text-lg font-bold text-gray-900">
+            {isEdit ? "تعديل بيانات الطالب" : "إضافة طالب جديد"}
+          </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -237,19 +282,23 @@ function AddStudentModal({
               onChange={(e) => setSubscriptionAmount(e.target.value)} placeholder="0" dir="ltr" className={inputCls} />
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">تاريخ بدء الاشتراك</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
-              dir="ltr" className={inputCls} />
-            <p className="text-xs text-gray-400 mt-1">تاريخ الانتهاء: {addDays(startDate, 30)}</p>
-          </div>
+          {!isEdit && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">تاريخ بدء الاشتراك</label>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                dir="ltr" className={inputCls} />
+              <p className="text-xs text-gray-400 mt-1">تاريخ الانتهاء: {addDays(startDate, 30)}</p>
+            </div>
+          )}
 
           {subscriptionAmount && (
             <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-900">
               <span>الإجمالي: <span className="font-bold">
                 {((Number(subscriptionAmount) || 0) + (type === "bus" ? Number(busAmount) || 0 : 0)).toLocaleString()} جنيه
               </span></span>
-              <p className="text-xs text-blue-600 mt-1">ينتهي الاشتراك في {addDays(startDate, 30)}</p>
+              {!isEdit && (
+                <p className="text-xs text-blue-600 mt-1">ينتهي الاشتراك في {addDays(startDate, 30)}</p>
+              )}
             </div>
           )}
 
@@ -264,10 +313,117 @@ function AddStudentModal({
             </button>
             <button type="submit" disabled={saving}
               className="flex-1 py-2.5 rounded-lg bg-[#1976d2] text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition">
-              {saving ? "جارٍ الحفظ..." : "حفظ"}
+              {saving ? "جارٍ الحفظ..." : isEdit ? "حفظ التعديلات" : "حفظ"}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Student Details Modal ────────────────────────────────────────────────────
+
+function StudentDetailsModal({
+  student,
+  onClose,
+}: {
+  student: Student;
+  onClose: () => void;
+}) {
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getDocs(query(collection(db, "payments"), where("studentId", "==", student.id))).then((snap) => {
+      const data = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as Payment))
+        .sort((a, b) => (b.date > a.date ? 1 : -1));
+      setPayments(data);
+      setLoading(false);
+    });
+  }, [student.id]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 py-6 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 my-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-bold text-gray-900">تفاصيل الطالب</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Student info */}
+        <div className="bg-gray-50 rounded-xl px-4 py-4 mb-5 space-y-2">
+          <p className="text-base font-bold text-gray-900">{student.name}</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+            <span className="text-gray-500">الموبايل</span>
+            <span className="font-medium text-gray-700" dir="ltr">{student.phone}</span>
+            <span className="text-gray-500">النوع</span>
+            <span className="font-medium text-gray-700">
+              {student.type === "bus" ? `عربية · ${student.area}` : "بدون مواصلات"}
+            </span>
+            <span className="text-gray-500">الاشتراك</span>
+            <span className="font-medium text-gray-700">{student.subscriptionAmount.toLocaleString()} ج</span>
+            {student.type === "bus" && <>
+              <span className="text-gray-500">العربية</span>
+              <span className="font-medium text-gray-700">{student.busAmount.toLocaleString()} ج</span>
+            </>}
+            <span className="text-gray-500">الإجمالي</span>
+            <span className="font-medium text-gray-700">{student.totalAmount.toLocaleString()} ج</span>
+            <span className="text-gray-500">المدفوع</span>
+            <span className="font-medium text-green-700">{student.paidAmount.toLocaleString()} ج</span>
+            <span className="text-gray-500">الباقي</span>
+            <span className={`font-medium ${student.remainingAmount > 0 ? "text-orange-600" : "text-green-600"}`}>
+              {student.remainingAmount.toLocaleString()} ج
+            </span>
+            <span className="text-gray-500">بداية الاشتراك</span>
+            <span className="font-medium text-gray-700">{student.startDate || "—"}</span>
+            <span className="text-gray-500">نهاية الاشتراك</span>
+            <span className="font-medium text-gray-700">{student.endDate || "—"}</span>
+            <span className="text-gray-500">الحالة</span>
+            <span className={`font-medium ${student.status === "active" ? "text-green-700" : "text-red-600"}`}>
+              {student.status === "active" ? "نشط" : "منتهي"}
+            </span>
+          </div>
+        </div>
+
+        {/* Payment history */}
+        <h3 className="text-sm font-bold text-gray-700 mb-3">سجل الدفعات</h3>
+        {loading ? (
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />)}
+          </div>
+        ) : payments.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-4">لا توجد دفعات مسجلة</p>
+        ) : (
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-3 py-2 font-semibold text-gray-600 text-right">التاريخ</th>
+                  <th className="px-3 py-2 font-semibold text-gray-600 text-right">المبلغ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {payments.map((p) => (
+                  <tr key={p.id}>
+                    <td className="px-3 py-2 text-gray-600">{p.date}</td>
+                    <td className="px-3 py-2 font-semibold text-green-700">{p.amount.toLocaleString()} ج</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <button onClick={onClose}
+          className="mt-5 w-full py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition">
+          إغلاق
+        </button>
       </div>
     </div>
   );
@@ -344,11 +500,9 @@ function PaymentModal({
               placeholder="0" dir="ltr" autoFocus
               className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-gray-50 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" />
           </div>
-
           {error && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">{error}</p>
           )}
-
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose}
               className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition">
@@ -401,9 +555,6 @@ function RenewalModal({
     }
   }
 
-  const inputCls =
-    "w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-gray-50 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition";
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 my-auto">
@@ -415,7 +566,6 @@ function RenewalModal({
             </svg>
           </button>
         </div>
-
         <div className="bg-blue-50 rounded-xl px-4 py-3 mb-5">
           <p className="text-sm font-semibold text-gray-900">{student.name}</p>
           <p className="text-xs text-gray-500 mt-0.5">
@@ -423,7 +573,6 @@ function RenewalModal({
             {student.endDate ? ` · انتهى: ${student.endDate}` : ""}
           </p>
         </div>
-
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">مبلغ الاشتراك الجديد (جنيه) *</label>
@@ -431,7 +580,6 @@ function RenewalModal({
               value={subAmount} onChange={(e) => setSubAmount(e.target.value)}
               placeholder="0" className={inputCls} />
           </div>
-
           {student.type === "bus" && (
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">مبلغ العربية (جنيه)</label>
@@ -440,7 +588,6 @@ function RenewalModal({
                 placeholder="0" className={inputCls} />
             </div>
           )}
-
           {sub > 0 && (
             <div className="bg-green-50 rounded-xl px-4 py-3 text-sm text-green-900">
               الإجمالي الجديد: <span className="font-bold">{total.toLocaleString()} جنيه</span>
@@ -449,11 +596,9 @@ function RenewalModal({
               </p>
             </div>
           )}
-
           {error && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">{error}</p>
           )}
-
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose}
               className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition">
@@ -539,6 +684,8 @@ export default function StudentsPage() {
   const [tab, setTab]                         = useState<"active" | "inactive">("active");
   const [search, setSearch]                   = useState("");
   const [showAddModal, setShowAddModal]       = useState(false);
+  const [editingStudent, setEditingStudent]   = useState<Student | null>(null);
+  const [viewingStudent, setViewingStudent]   = useState<Student | null>(null);
   const [payingStudent, setPayingStudent]     = useState<Student | null>(null);
   const [renewingStudent, setRenewingStudent] = useState<Student | null>(null);
   const [deletingStudent, setDeletingStudent] = useState<Student | null>(null);
@@ -575,8 +722,16 @@ export default function StudentsPage() {
   const activeCount   = students.filter((s) => s.status === "active").length;
   const inactiveCount = students.filter((s) => s.status === "inactive").length;
 
-  function handleStudentAdded(student: Student) {
-    setStudents((prev) => [student, ...prev]);
+  function handleStudentSaved(student: Student) {
+    setStudents((prev) => {
+      const idx = prev.findIndex((s) => s.id === student.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = student;
+        return next;
+      }
+      return [student, ...prev];
+    });
   }
 
   function handlePaymentMade(studentId: string, newPaid: number, newRemaining: number) {
@@ -681,7 +836,7 @@ export default function StudentsPage() {
         ) : (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[900px]">
+              <table className="w-full text-sm min-w-[960px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-right">
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الاسم</th>
@@ -692,8 +847,10 @@ export default function StudentsPage() {
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">مبلغ العربية</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المدفوع</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الباقي</th>
-                    {tab === "active" && (
+                    {tab === "active" ? (
                       <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">ينتهي</th>
+                    ) : (
+                      <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">تاريخ الانتهاء</th>
                     )}
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">إجراءات</th>
                   </tr>
@@ -707,7 +864,14 @@ export default function StudentsPage() {
                       student.endDate <= addDays(today, 5);
                     return (
                       <tr key={student.id} className={`hover:bg-gray-50 transition ${student.status === "inactive" ? "opacity-75" : ""}`}>
-                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{student.name}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <button
+                            onClick={() => setViewingStudent(student)}
+                            className="font-medium text-[#1976d2] hover:underline text-right"
+                          >
+                            {student.name}
+                          </button>
+                        </td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap" dir="ltr">{student.phone}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -733,16 +897,14 @@ export default function StudentsPage() {
                             {student.remainingAmount.toLocaleString()}
                           </span>
                         </td>
-                        {tab === "active" && (
-                          <td className="px-4 py-3 whitespace-nowrap text-xs">
-                            {student.endDate ? (
-                              <span className={expiringSoon ? "text-red-600 font-semibold" : "text-gray-500"}>
-                                {student.endDate}
-                                {expiringSoon && " ⚠"}
-                              </span>
-                            ) : "—"}
-                          </td>
-                        )}
+                        <td className="px-4 py-3 whitespace-nowrap text-xs">
+                          {student.endDate ? (
+                            <span className={tab === "active" && expiringSoon ? "text-red-600 font-semibold" : "text-gray-500"}>
+                              {student.endDate}
+                              {tab === "active" && expiringSoon && " ⚠"}
+                            </span>
+                          ) : "—"}
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
                             {student.status === "active" ? (
@@ -773,6 +935,12 @@ export default function StudentsPage() {
                               </>
                             )}
                             <button
+                              onClick={() => setEditingStudent(student)}
+                              className="px-2.5 py-1.5 rounded-lg bg-yellow-50 text-yellow-700 text-xs font-semibold hover:bg-yellow-100 transition"
+                            >
+                              تعديل
+                            </button>
+                            <button
                               onClick={() => setDeletingStudent(student)}
                               className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition"
                             >
@@ -795,7 +963,22 @@ export default function StudentsPage() {
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}
       {showAddModal && (
-        <AddStudentModal onClose={() => setShowAddModal(false)} onSave={handleStudentAdded} />
+        <AddEditStudentModal onClose={() => setShowAddModal(false)} onSaved={handleStudentSaved} />
+      )}
+
+      {editingStudent && (
+        <AddEditStudentModal
+          student={editingStudent}
+          onClose={() => setEditingStudent(null)}
+          onSaved={(s) => { handleStudentSaved(s); setEditingStudent(null); }}
+        />
+      )}
+
+      {viewingStudent && (
+        <StudentDetailsModal
+          student={viewingStudent}
+          onClose={() => setViewingStudent(null)}
+        />
       )}
 
       {payingStudent && (
