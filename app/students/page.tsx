@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, addDoc, getDocs, updateDoc, doc } from "firebase/firestore";
+import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, where } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import Navbar from "../components/Navbar";
 
@@ -82,6 +82,14 @@ async function registerPayment(
   });
 }
 
+async function deleteStudentWithPayments(studentId: string): Promise<void> {
+  const paymentsSnap = await getDocs(query(collection(db, "payments"), where("studentId", "==", studentId)));
+  await Promise.all([
+    deleteDoc(doc(db, "students", studentId)),
+    ...paymentsSnap.docs.map((d) => deleteDoc(d.ref)),
+  ]);
+}
+
 // Batch-expire students whose endDate has passed
 async function checkAndExpireStudents(students: Student[]): Promise<Student[]> {
   const today = new Date().toISOString().slice(0, 10);
@@ -107,6 +115,7 @@ function AddStudentModal({
   onClose: () => void;
   onSave: (student: Student) => void;
 }) {
+  const todayStr = new Date().toISOString().slice(0, 10);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [type, setType] = useState<"street" | "bus">("street");
@@ -114,6 +123,7 @@ function AddStudentModal({
   const [customArea, setCustomArea] = useState("");
   const [subscriptionAmount, setSubscriptionAmount] = useState("");
   const [busAmount, setBusAmount] = useState("");
+  const [startDate, setStartDate] = useState(todayStr);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -129,7 +139,6 @@ function AddStudentModal({
     if (isNaN(sub) || sub <= 0) { setError("يرجى إدخال مبلغ اشتراك صحيح"); return; }
     setSaving(true);
     try {
-      const today = new Date().toISOString().slice(0, 10);
       const total = sub + bus;
       const data: Omit<Student, "id"> = {
         name: name.trim(),
@@ -142,9 +151,9 @@ function AddStudentModal({
         paidAmount: 0,
         remainingAmount: total,
         status: "active",
-        startDate: today,
-        endDate: addDays(today, 30),
-        createdAt: today,
+        startDate,
+        endDate: addDays(startDate, 30),
+        createdAt: new Date().toISOString().slice(0, 10),
       };
       const id = await createStudent(data);
       onSave({ id, ...data });
@@ -228,12 +237,19 @@ function AddStudentModal({
               onChange={(e) => setSubscriptionAmount(e.target.value)} placeholder="0" dir="ltr" className={inputCls} />
           </div>
 
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">تاريخ بدء الاشتراك</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              dir="ltr" className={inputCls} />
+            <p className="text-xs text-gray-400 mt-1">تاريخ الانتهاء: {addDays(startDate, 30)}</p>
+          </div>
+
           {subscriptionAmount && (
             <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-900">
               <span>الإجمالي: <span className="font-bold">
                 {((Number(subscriptionAmount) || 0) + (type === "bus" ? Number(busAmount) || 0 : 0)).toLocaleString()} جنيه
               </span></span>
-              <p className="text-xs text-blue-600 mt-1">ينتهي الاشتراك بعد 30 يوم</p>
+              <p className="text-xs text-blue-600 mt-1">ينتهي الاشتراك في {addDays(startDate, 30)}</p>
             </div>
           )}
 
@@ -454,6 +470,65 @@ function RenewalModal({
   );
 }
 
+// ─── Delete Confirm Modal ─────────────────────────────────────────────────────
+
+function DeleteConfirmModal({
+  student,
+  onClose,
+  onDeleted,
+}: {
+  student: Student;
+  onClose: () => void;
+  onDeleted: (id: string) => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deleteStudentWithPayments(student.id);
+      onDeleted(student.id);
+      onClose();
+    } catch {
+      setError("حدث خطأ أثناء الحذف. حاول مرة أخرى.");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-900">حذف الطالب</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <p className="text-sm text-gray-700 mb-1">
+          هل تريد حذف الطالب <span className="font-semibold text-gray-900">{student.name}</span>؟
+        </p>
+        <p className="text-xs text-red-600 mb-5">سيتم حذف الطالب وجميع دفعاته نهائياً ولا يمكن التراجع.</p>
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5 mb-4">{error}</p>
+        )}
+        <div className="flex gap-3">
+          <button type="button" onClick={onClose}
+            className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition">
+            إلغاء
+          </button>
+          <button type="button" onClick={handleDelete} disabled={deleting}
+            className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed transition">
+            {deleting ? "جارٍ الحذف..." : "حذف نهائي"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function StudentsPage() {
@@ -466,6 +541,7 @@ export default function StudentsPage() {
   const [showAddModal, setShowAddModal]       = useState(false);
   const [payingStudent, setPayingStudent]     = useState<Student | null>(null);
   const [renewingStudent, setRenewingStudent] = useState<Student | null>(null);
+  const [deletingStudent, setDeletingStudent] = useState<Student | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -507,6 +583,10 @@ export default function StudentsPage() {
     setStudents((prev) =>
       prev.map((s) => s.id === studentId ? { ...s, paidAmount: newPaid, remainingAmount: newRemaining } : s)
     );
+  }
+
+  function handleDeleted(id: string) {
+    setStudents((prev) => prev.filter((s) => s.id !== id));
   }
 
   function handleRenewed(id: string, sub: number, bus: number, total: number) {
@@ -692,6 +772,12 @@ export default function StudentsPage() {
                                 </a>
                               </>
                             )}
+                            <button
+                              onClick={() => setDeletingStudent(student)}
+                              className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition"
+                            >
+                              حذف
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -725,6 +811,14 @@ export default function StudentsPage() {
           student={renewingStudent}
           onClose={() => setRenewingStudent(null)}
           onRenewed={handleRenewed}
+        />
+      )}
+
+      {deletingStudent && (
+        <DeleteConfirmModal
+          student={deletingStudent}
+          onClose={() => setDeletingStudent(null)}
+          onDeleted={handleDeleted}
         />
       )}
     </div>
