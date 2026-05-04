@@ -3,12 +3,12 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCiclCpOWBGoZqFQnLA8vI6VYkte050goY",
-  authDomain: "gym-template-5e751.firebaseapp.com",
-  projectId: "gym-template-5e751",
-  storageBucket: "gym-template-5e751.firebasestorage.app",
-  messagingSenderId: "844467576258",
-  appId: "1:844467576258:web:a838dfcba7f6a101658a5b",
+  apiKey: "AIzaSyBedWvr55EqluPJ-Fcwz3Lqn2B0jIrk6Ac",
+  authDomain: "nursery-app-77c80.firebaseapp.com",
+  projectId: "nursery-app-77c80",
+  storageBucket: "nursery-app-77c80.firebasestorage.app",
+  messagingSenderId: "177123113404",
+  appId: "1:177123113404:web:37a7b68c0c22a0109713b9",
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];

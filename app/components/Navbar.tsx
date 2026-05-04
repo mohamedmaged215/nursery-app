@@ -6,7 +6,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { auth } from "../lib/firebase";
 
-const GYM_CONFIG = { name: "Hulk Gym" };
+const links = [
+  { href: "/dashboard", label: "الرئيسية" },
+  { href: "/students", label: "الطلاب" },
+  { href: "/buses", label: "العربيات" },
+  { href: "/employees", label: "الموظفين" },
+  { href: "/expenses", label: "المصاريف" },
+  { href: "/reports", label: "التقارير" },
+];
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -18,43 +25,34 @@ export default function Navbar() {
     router.push("/");
   }
 
-  const links = [
-    { href: "/dashboard", label: "الرئيسية" },
-    { href: "/customers", label: "العملاء" },
-    { href: "/sales", label: "المبيعات" },
-    { href: "/expenses", label: "المصاريف" },
-    { href: "/reports", label: "التقارير" },
-    { href: "/inventory", label: "المشتريات" },
-    { href: "/treasury", label: "الخزينة" },
-  ];
-
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-
-        <div className="flex items-center gap-4">
-          {/* Logo + gym name */}
-          <div className="flex flex-col items-center gap-0.5 shrink-0">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 004 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" />
-              </svg>
-            </div>
-            <span className="text-[10px] font-semibold text-gray-500 leading-none">{GYM_CONFIG.name}</span>
+    <header className="sticky top-0 z-10">
+      {/* Black top bar */}
+      <div className="bg-[#1a1a2e] h-12 flex items-center px-6">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
           </div>
+          <span className="text-white font-bold text-base tracking-wide">حضانة شرق الكوبري</span>
+        </div>
+      </div>
 
-          {/* Desktop nav links */}
-          <nav className="hidden sm:flex items-center gap-1">
+      {/* Blue nav bar */}
+      <div className="bg-[#1976d2]">
+        <div className="flex items-center px-6 h-10">
+          {/* Desktop links */}
+          <nav className="hidden sm:flex items-center gap-1 flex-1">
             {links.map(({ href, label }) => {
               const active = pathname === href || pathname.startsWith(href + "/");
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                    active
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition ${
+                    active ? "bg-white/20 text-white" : "text-white/80 hover:text-white hover:bg-white/10"
                   }`}
                 >
                   {label}
@@ -62,21 +60,12 @@ export default function Navbar() {
               );
             })}
           </nav>
-        </div>
 
-        <div className="flex items-center gap-2">
-          {/* Desktop logout */}
-          <button
-            onClick={handleLogout}
-            className="hidden sm:block text-sm font-medium text-gray-500 hover:text-gray-900 transition"
-          >
-            خروج
-          </button>
-
-          {/* Mobile hamburger */}
+          {/* Mobile: subtitle + hamburger */}
+          <span className="sm:hidden text-white/80 text-xs font-medium flex-1">نظام إدارة الحضانة</span>
           <button
             onClick={() => setMenuOpen((o) => !o)}
-            className="sm:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition"
+            className="sm:hidden p-1.5 rounded text-white/80 hover:text-white hover:bg-white/10 transition"
             aria-label="القائمة"
           >
             {menuOpen ? (
@@ -89,37 +78,43 @@ export default function Navbar() {
               </svg>
             )}
           </button>
-        </div>
-      </div>
 
-      {/* Mobile dropdown menu */}
-      {menuOpen && (
-        <div className="sm:hidden border-t border-gray-100 bg-white px-4 py-3 space-y-1">
-          {links.map(({ href, label }) => {
-            const active = pathname === href || pathname.startsWith(href + "/");
-            return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setMenuOpen(false)}
-                className={`block px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                  active
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-gray-700 hover:bg-gray-100"
-                }`}
-              >
-                {label}
-              </Link>
-            );
-          })}
+          {/* Desktop logout */}
           <button
             onClick={handleLogout}
-            className="block w-full text-right px-3 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition"
+            className="hidden sm:block text-white/80 hover:text-white text-sm font-medium transition px-3 py-1.5 rounded hover:bg-white/10"
           >
             خروج
           </button>
         </div>
-      )}
+
+        {/* Mobile dropdown */}
+        {menuOpen && (
+          <div className="sm:hidden border-t border-white/20 bg-[#1565c0] px-4 py-3 space-y-1">
+            {links.map(({ href, label }) => {
+              const active = pathname === href || pathname.startsWith(href + "/");
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={() => setMenuOpen(false)}
+                  className={`block px-3 py-2.5 rounded text-sm font-medium transition ${
+                    active ? "bg-white/20 text-white" : "text-white/80 hover:text-white hover:bg-white/10"
+                  }`}
+                >
+                  {label}
+                </Link>
+              );
+            })}
+            <button
+              onClick={handleLogout}
+              className="block w-full text-right px-3 py-2.5 rounded text-sm font-medium text-white/80 hover:text-white hover:bg-white/10 transition"
+            >
+              خروج
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 }
