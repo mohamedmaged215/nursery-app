@@ -16,7 +16,7 @@ interface Student {
   type: "street" | "bus";
   area: string;
   subscriptionAmount: number;
-  busAmount: number;
+  busAmount: number;       // kept in Firestore for legacy; not used in calculations
   totalAmount: number;
   paidAmount: number;
   remainingAmount: number;
@@ -35,7 +35,21 @@ interface Payment {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const DEFAULT_AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"];
+const TYPE_OPTIONS = [
+  { value: "street", label: "بدون مواصلات" },
+  { value: "bus",    label: "عربية عم سعيد" },
+  { value: "bus2",   label: "عربية أبو الشيخ" },
+  { value: "bus3",   label: "توكتوك العرب" },
+] as const;
+
+// Display label for a student's transport type
+function typeLabel(s: Student): string {
+  if (s.type === "street") return "بدون مواصلات";
+  if (s.area === "عربية عم سعيد")   return "عربية عم سعيد";
+  if (s.area === "عربية أبو الشيخ") return "عربية أبو الشيخ";
+  if (s.area === "توكتوك العرب")    return "توكتوك العرب";
+  return s.area || "عربية";
+}
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr);
@@ -62,18 +76,19 @@ async function saveEditStudent(id: string, patch: Partial<Omit<Student, "id">>):
 async function renewStudent(
   id: string,
   subscriptionAmount: number,
-  busAmount: number,
-  type: "street" | "bus"
+  type: "street" | "bus",
+  area: string,
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
-  const total = subscriptionAmount + (type === "bus" ? busAmount : 0);
   await updateDoc(doc(db, "students", id), {
     status: "active",
     subscriptionAmount,
-    busAmount: type === "bus" ? busAmount : 0,
-    totalAmount: total,
+    busAmount: 0,
+    totalAmount: subscriptionAmount,
     paidAmount: 0,
-    remainingAmount: total,
+    remainingAmount: subscriptionAmount,
+    type,
+    area,
     startDate: today,
     endDate: addDays(today, 30),
   });
@@ -135,51 +150,45 @@ function AddEditStudentModal({
   const isEdit = !!student;
   const todayStr = new Date().toISOString().slice(0, 10);
 
+  // Determine initial transport value from existing student
+  const initialTransport = (() => {
+    if (!student) return "street";
+    if (student.type === "street") return "street";
+    return student.area || "عربية عم سعيد";
+  })();
+
   const [name, setName] = useState(student?.name ?? "");
   const [phone, setPhone] = useState(student?.phone ?? "");
-  const [type, setType] = useState<"street" | "bus">(student?.type ?? "street");
-  const [area, setArea] = useState(() => {
-    if (!student?.area) return DEFAULT_AREAS[0];
-    return DEFAULT_AREAS.includes(student.area) ? student.area : "__custom__";
-  });
-  const [customArea, setCustomArea] = useState(() => {
-    if (!student?.area || DEFAULT_AREAS.includes(student.area)) return "";
-    return student.area;
-  });
+  const [transport, setTransport] = useState<string>(initialTransport);
   const [subscriptionAmount, setSubscriptionAmount] = useState(
     student?.subscriptionAmount ? String(student.subscriptionAmount) : ""
-  );
-  const [busAmount, setBusAmount] = useState(
-    student?.busAmount ? String(student.busAmount) : ""
   );
   const [startDate, setStartDate] = useState(student?.startDate ?? todayStr);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const effectiveArea = area === "__custom__" ? customArea : area;
+  const isBus = transport !== "street";
+  const effectiveType: "street" | "bus" = isBus ? "bus" : "street";
+  const effectiveArea = isBus ? transport : "";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     const sub = Number(subscriptionAmount);
-    const bus = type === "bus" ? Number(busAmount) || 0 : 0;
     if (!name.trim() || !phone.trim()) { setError("يرجى ملء جميع الحقول المطلوبة"); return; }
-    if (type === "bus" && !effectiveArea.trim()) { setError("يرجى تحديد المنطقة"); return; }
     if (isNaN(sub) || sub <= 0) { setError("يرجى إدخال مبلغ اشتراك صحيح"); return; }
     setSaving(true);
     try {
-      const total = sub + bus;
       if (isEdit && student) {
-        const paid = student.paidAmount;
-        const remaining = Math.max(0, total - paid);
+        const remaining = Math.max(0, sub - student.paidAmount);
         const patch = {
           name: name.trim(),
           phone: phone.trim(),
-          type,
-          area: type === "bus" ? effectiveArea.trim() : "",
+          type: effectiveType,
+          area: effectiveArea,
           subscriptionAmount: sub,
-          busAmount: bus,
-          totalAmount: total,
+          busAmount: 0,
+          totalAmount: sub,
           remainingAmount: remaining,
         };
         await saveEditStudent(student.id, patch);
@@ -188,13 +197,13 @@ function AddEditStudentModal({
         const data: Omit<Student, "id"> = {
           name: name.trim(),
           phone: phone.trim(),
-          type,
-          area: type === "bus" ? effectiveArea.trim() : "",
+          type: effectiveType,
+          area: effectiveArea,
           subscriptionAmount: sub,
-          busAmount: bus,
-          totalAmount: total,
+          busAmount: 0,
+          totalAmount: sub,
           paidAmount: 0,
-          remainingAmount: total,
+          remainingAmount: sub,
           status: "active",
           startDate,
           endDate: addDays(startDate, 30),
@@ -239,42 +248,20 @@ function AddEditStudentModal({
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">نوع الاشتراك *</label>
-            <div className="flex gap-3">
-              {(["street", "bus"] as const).map((t) => (
-                <button key={t} type="button" onClick={() => setType(t)}
-                  className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition border ${
-                    type === t ? "bg-[#1976d2] text-white border-[#1976d2]" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+            <label className="block text-sm font-semibold text-gray-700 mb-1">نوع الاشتراك</label>
+            <div className="grid grid-cols-2 gap-2">
+              {TYPE_OPTIONS.map((opt) => (
+                <button key={opt.value} type="button" onClick={() => setTransport(opt.value)}
+                  className={`py-2 rounded-lg text-sm font-medium transition border ${
+                    transport === opt.value
+                      ? "bg-[#1976d2] text-white border-[#1976d2]"
+                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                   }`}>
-                  {t === "street" ? "بدون مواصلات" : "عربية"}
+                  {opt.label}
                 </button>
               ))}
             </div>
           </div>
-
-          {type === "bus" && (
-            <>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">المنطقة *</label>
-                <select value={area} onChange={(e) => setArea(e.target.value)} className={inputCls}>
-                  {DEFAULT_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
-                  <option value="__custom__">أخرى...</option>
-                </select>
-              </div>
-              {area === "__custom__" && (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">اسم المنطقة</label>
-                  <input type="text" value={customArea} onChange={(e) => setCustomArea(e.target.value)}
-                    placeholder="أدخل اسم المنطقة" className={inputCls} />
-                </div>
-              )}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">مبلغ العربية (جنيه)</label>
-                <input type="number" min="0" value={busAmount} onChange={(e) => setBusAmount(e.target.value)}
-                  placeholder="0" dir="ltr" className={inputCls} />
-              </div>
-            </>
-          )}
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">مبلغ الاشتراك (جنيه) *</label>
@@ -293,9 +280,7 @@ function AddEditStudentModal({
 
           {subscriptionAmount && (
             <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm text-blue-900">
-              <span>الإجمالي: <span className="font-bold">
-                {((Number(subscriptionAmount) || 0) + (type === "bus" ? Number(busAmount) || 0 : 0)).toLocaleString()} جنيه
-              </span></span>
+              <span>الإجمالي: <span className="font-bold">{(Number(subscriptionAmount) || 0).toLocaleString()} جنيه</span></span>
               {!isEdit && (
                 <p className="text-xs text-blue-600 mt-1">ينتهي الاشتراك في {addDays(startDate, 30)}</p>
               )}
@@ -332,7 +317,7 @@ function StudentDetailsModal({
   onClose: () => void;
 }) {
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingP, setLoadingP] = useState(true);
 
   useEffect(() => {
     getDocs(query(collection(db, "payments"), where("studentId", "==", student.id))).then((snap) => {
@@ -340,7 +325,7 @@ function StudentDetailsModal({
         .map((d) => ({ id: d.id, ...d.data() } as Payment))
         .sort((a, b) => (b.date > a.date ? 1 : -1));
       setPayments(data);
-      setLoading(false);
+      setLoadingP(false);
     });
   }, [student.id]);
 
@@ -356,22 +341,15 @@ function StudentDetailsModal({
           </button>
         </div>
 
-        {/* Student info */}
         <div className="bg-gray-50 rounded-xl px-4 py-4 mb-5 space-y-2">
           <p className="text-base font-bold text-gray-900">{student.name}</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
             <span className="text-gray-500">الموبايل</span>
             <span className="font-medium text-gray-700" dir="ltr">{student.phone}</span>
-            <span className="text-gray-500">النوع</span>
-            <span className="font-medium text-gray-700">
-              {student.type === "bus" ? `عربية · ${student.area}` : "بدون مواصلات"}
-            </span>
-            <span className="text-gray-500">الاشتراك</span>
+            <span className="text-gray-500">نوع الاشتراك</span>
+            <span className="font-medium text-gray-700">{typeLabel(student)}</span>
+            <span className="text-gray-500">مبلغ الاشتراك</span>
             <span className="font-medium text-gray-700">{student.subscriptionAmount.toLocaleString()} ج</span>
-            {student.type === "bus" && <>
-              <span className="text-gray-500">العربية</span>
-              <span className="font-medium text-gray-700">{student.busAmount.toLocaleString()} ج</span>
-            </>}
             <span className="text-gray-500">الإجمالي</span>
             <span className="font-medium text-gray-700">{student.totalAmount.toLocaleString()} ج</span>
             <span className="text-gray-500">المدفوع</span>
@@ -391,9 +369,8 @@ function StudentDetailsModal({
           </div>
         </div>
 
-        {/* Payment history */}
         <h3 className="text-sm font-bold text-gray-700 mb-3">سجل الدفعات</h3>
-        {loading ? (
+        {loadingP ? (
           <div className="space-y-2">
             {[...Array(3)].map((_, i) => <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />)}
           </div>
@@ -476,7 +453,6 @@ function PaymentModal({
             </svg>
           </button>
         </div>
-
         <div className="bg-gray-50 rounded-xl px-4 py-3 mb-4 space-y-1.5">
           <p className="text-sm font-semibold text-gray-900">{student.name}</p>
           <div className="flex justify-between text-xs">
@@ -492,13 +468,11 @@ function PaymentModal({
             <span className="font-medium text-orange-600">{student.remainingAmount.toLocaleString()} جنيه</span>
           </div>
         </div>
-
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">المبلغ المدفوع (جنيه)</label>
             <input type="number" min="1" required value={amount} onChange={(e) => setAmount(e.target.value)}
-              placeholder="0" dir="ltr" autoFocus
-              className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-gray-50 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" />
+              placeholder="0" dir="ltr" autoFocus className={inputCls} />
           </div>
           {error && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">{error}</p>
@@ -528,16 +502,17 @@ function RenewalModal({
 }: {
   student: Student;
   onClose: () => void;
-  onRenewed: (id: string, sub: number, bus: number, total: number) => void;
+  onRenewed: (id: string, sub: number, type: "street" | "bus", area: string) => void;
 }) {
+  const initialTransport = student.type === "street" ? "street" : (student.area || "عربية عم سعيد");
   const [subAmount, setSubAmount] = useState(String(student.subscriptionAmount || ""));
-  const [busAmt,    setBusAmt]    = useState(String(student.busAmount || ""));
+  const [transport, setTransport] = useState<string>(initialTransport);
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState("");
 
-  const sub   = Number(subAmount) || 0;
-  const bus   = student.type === "bus" ? Number(busAmt) || 0 : 0;
-  const total = sub + bus;
+  const sub = Number(subAmount) || 0;
+  const effectiveType: "street" | "bus" = transport === "street" ? "street" : "bus";
+  const effectiveArea = transport === "street" ? "" : transport;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -545,8 +520,8 @@ function RenewalModal({
     if (sub <= 0) { setError("يرجى إدخال مبلغ اشتراك صحيح"); return; }
     setSaving(true);
     try {
-      await renewStudent(student.id, sub, bus, student.type);
-      onRenewed(student.id, sub, bus, total);
+      await renewStudent(student.id, sub, effectiveType, effectiveArea);
+      onRenewed(student.id, sub, effectiveType, effectiveArea);
       onClose();
     } catch {
       setError("حدث خطأ أثناء الحفظ. حاول مرة أخرى.");
@@ -569,28 +544,35 @@ function RenewalModal({
         <div className="bg-blue-50 rounded-xl px-4 py-3 mb-5">
           <p className="text-sm font-semibold text-gray-900">{student.name}</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {student.type === "bus" ? `عربية · ${student.area}` : "بدون مواصلات"}
+            {typeLabel(student)}
             {student.endDate ? ` · انتهى: ${student.endDate}` : ""}
           </p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">نوع الاشتراك</label>
+            <div className="grid grid-cols-2 gap-2">
+              {TYPE_OPTIONS.map((opt) => (
+                <button key={opt.value} type="button" onClick={() => setTransport(opt.value)}
+                  className={`py-2 rounded-lg text-sm font-medium transition border ${
+                    transport === opt.value
+                      ? "bg-[#1976d2] text-white border-[#1976d2]"
+                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                  }`}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">مبلغ الاشتراك الجديد (جنيه) *</label>
             <input type="number" min="1" required dir="ltr" autoFocus
               value={subAmount} onChange={(e) => setSubAmount(e.target.value)}
               placeholder="0" className={inputCls} />
           </div>
-          {student.type === "bus" && (
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">مبلغ العربية (جنيه)</label>
-              <input type="number" min="0" dir="ltr"
-                value={busAmt} onChange={(e) => setBusAmt(e.target.value)}
-                placeholder="0" className={inputCls} />
-            </div>
-          )}
           {sub > 0 && (
             <div className="bg-green-50 rounded-xl px-4 py-3 text-sm text-green-900">
-              الإجمالي الجديد: <span className="font-bold">{total.toLocaleString()} جنيه</span>
+              الإجمالي الجديد: <span className="font-bold">{sub.toLocaleString()} جنيه</span>
               <p className="text-xs text-green-700 mt-0.5">
                 سيتم تفعيل الاشتراك لمدة 30 يوم · ينتهي {addDays(new Date().toISOString().slice(0, 10), 30)}
               </p>
@@ -725,11 +707,7 @@ export default function StudentsPage() {
   function handleStudentSaved(student: Student) {
     setStudents((prev) => {
       const idx = prev.findIndex((s) => s.id === student.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = student;
-        return next;
-      }
+      if (idx >= 0) { const next = [...prev]; next[idx] = student; return next; }
       return [student, ...prev];
     });
   }
@@ -744,13 +722,14 @@ export default function StudentsPage() {
     setStudents((prev) => prev.filter((s) => s.id !== id));
   }
 
-  function handleRenewed(id: string, sub: number, bus: number, total: number) {
+  function handleRenewed(id: string, sub: number, type: "street" | "bus", area: string) {
     const today = new Date().toISOString().slice(0, 10);
     setStudents((prev) =>
       prev.map((s) =>
         s.id === id
-          ? { ...s, status: "active", subscriptionAmount: sub, busAmount: bus, totalAmount: total,
-              paidAmount: 0, remainingAmount: total, startDate: today, endDate: addDays(today, 30) }
+          ? { ...s, status: "active", type, area, subscriptionAmount: sub, busAmount: 0,
+              totalAmount: sub, paidAmount: 0, remainingAmount: sub,
+              startDate: today, endDate: addDays(today, 30) }
           : s
       )
     );
@@ -789,28 +768,21 @@ export default function StudentsPage() {
         {/* ── Tabs + Search ────────────────────────────────────────────────── */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit shrink-0">
-            <button
-              onClick={() => setTab("active")}
+            <button onClick={() => setTab("active")}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
                 tab === "active" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
+              }`}>
               نشط ({activeCount})
             </button>
-            <button
-              onClick={() => setTab("inactive")}
+            <button onClick={() => setTab("inactive")}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
                 tab === "inactive" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
+              }`}>
               اشتراكات منتهية ({inactiveCount})
             </button>
           </div>
-
           <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="بحث بالاسم أو الموبايل..."
             className="w-full sm:max-w-xs px-3.5 py-2 rounded-lg border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
           />
@@ -819,9 +791,7 @@ export default function StudentsPage() {
         {/* ── Table ───────────────────────────────────────────────────────── */}
         {loading ? (
           <div className="space-y-3">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="bg-gray-100 rounded-xl h-14 animate-pulse" />
-            ))}
+            {[...Array(5)].map((_, i) => <div key={i} className="bg-gray-100 rounded-xl h-14 animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-gray-400">
@@ -836,28 +806,24 @@ export default function StudentsPage() {
         ) : (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[960px]">
+              <table className="w-full text-sm min-w-[800px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-right">
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الاسم</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">موبايل ولي الأمر</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">النوع</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المنطقة</th>
+                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">نوع الاشتراك</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">مبلغ الاشتراك</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">مبلغ العربية</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المدفوع</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الباقي</th>
-                    {tab === "active" ? (
-                      <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">ينتهي</th>
-                    ) : (
-                      <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">تاريخ الانتهاء</th>
-                    )}
+                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">
+                      {tab === "active" ? "ينتهي" : "تاريخ الانتهاء"}
+                    </th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">إجراءات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map((student) => {
-                    const waMsg = `السلام عليكم مع حضرتك إدارة الحضانة\nبنفكركم إن اشتراك الطفل ${student.name} انتهى\nبرجاء تجديد الاشتراك\nمع تحيات إدارة حضانة شرق الكوبري`;
+                    const waMsg = `السلام عليكم مع حضرتك إدارة الحضانة\nبنفكر حضرتك إن اشتراك الطفل ${student.name} انتهى\nبرجاء تجديد الاشتراك\nمع تحيات إدارة Mr Kids`;
                     const waUrl = `https://wa.me/2${student.phone}?text=${encodeURIComponent(waMsg)}`;
                     const today = new Date().toISOString().slice(0, 10);
                     const expiringSoon = student.endDate && student.endDate > today &&
@@ -865,10 +831,8 @@ export default function StudentsPage() {
                     return (
                       <tr key={student.id} className={`hover:bg-gray-50 transition ${student.status === "inactive" ? "opacity-75" : ""}`}>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <button
-                            onClick={() => setViewingStudent(student)}
-                            className="font-medium text-[#1976d2] hover:underline text-right"
-                          >
+                          <button onClick={() => setViewingStudent(student)}
+                            className="font-medium text-[#1976d2] hover:underline text-right">
                             {student.name}
                           </button>
                         </td>
@@ -877,17 +841,11 @@ export default function StudentsPage() {
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                             student.type === "bus" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
                           }`}>
-                            {student.type === "bus" ? "عربية" : "بدون مواصلات"}
+                            {typeLabel(student)}
                           </span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                          {student.type === "bus" && student.area ? student.area : "—"}
                         </td>
                         <td className="px-4 py-3 text-gray-900 whitespace-nowrap">
                           {student.subscriptionAmount.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-gray-900 whitespace-nowrap">
-                          {student.type === "bus" ? student.busAmount.toLocaleString() : "—"}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className="font-medium text-green-700">{student.paidAmount.toLocaleString()}</span>
@@ -900,32 +858,21 @@ export default function StudentsPage() {
                         <td className="px-4 py-3 whitespace-nowrap text-xs">
                           {student.endDate ? (
                             <span className={tab === "active" && expiringSoon ? "text-red-600 font-semibold" : "text-gray-500"}>
-                              {student.endDate}
-                              {tab === "active" && expiringSoon && " ⚠"}
+                              {student.endDate}{tab === "active" && expiringSoon && " ⚠"}
                             </span>
                           ) : "—"}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
                             {student.status === "active" ? (
-                              <>
-                                <button
-                                  onClick={() => setPayingStudent(student)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100 transition"
-                                >
-                                  دفع
-                                </button>
-                                <a href={`https://wa.me/2${student.phone}`} target="_blank" rel="noopener noreferrer"
-                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition">
-                                  واتساب
-                                </a>
-                              </>
+                              <button onClick={() => setPayingStudent(student)}
+                                className="px-2.5 py-1.5 rounded-lg bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100 transition">
+                                دفع
+                              </button>
                             ) : (
                               <>
-                                <button
-                                  onClick={() => setRenewingStudent(student)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition"
-                                >
+                                <button onClick={() => setRenewingStudent(student)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition">
                                   تجديد
                                 </button>
                                 <a href={waUrl} target="_blank" rel="noopener noreferrer"
@@ -934,16 +881,12 @@ export default function StudentsPage() {
                                 </a>
                               </>
                             )}
-                            <button
-                              onClick={() => setEditingStudent(student)}
-                              className="px-2.5 py-1.5 rounded-lg bg-yellow-50 text-yellow-700 text-xs font-semibold hover:bg-yellow-100 transition"
-                            >
+                            <button onClick={() => setEditingStudent(student)}
+                              className="px-2.5 py-1.5 rounded-lg bg-yellow-50 text-yellow-700 text-xs font-semibold hover:bg-yellow-100 transition">
                               تعديل
                             </button>
-                            <button
-                              onClick={() => setDeletingStudent(student)}
-                              className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition"
-                            >
+                            <button onClick={() => setDeletingStudent(student)}
+                              className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition">
                               حذف
                             </button>
                           </div>
@@ -965,44 +908,21 @@ export default function StudentsPage() {
       {showAddModal && (
         <AddEditStudentModal onClose={() => setShowAddModal(false)} onSaved={handleStudentSaved} />
       )}
-
       {editingStudent && (
-        <AddEditStudentModal
-          student={editingStudent}
-          onClose={() => setEditingStudent(null)}
-          onSaved={(s) => { handleStudentSaved(s); setEditingStudent(null); }}
-        />
+        <AddEditStudentModal student={editingStudent} onClose={() => setEditingStudent(null)}
+          onSaved={(s) => { handleStudentSaved(s); setEditingStudent(null); }} />
       )}
-
       {viewingStudent && (
-        <StudentDetailsModal
-          student={viewingStudent}
-          onClose={() => setViewingStudent(null)}
-        />
+        <StudentDetailsModal student={viewingStudent} onClose={() => setViewingStudent(null)} />
       )}
-
       {payingStudent && (
-        <PaymentModal
-          student={payingStudent}
-          onClose={() => setPayingStudent(null)}
-          onPaid={handlePaymentMade}
-        />
+        <PaymentModal student={payingStudent} onClose={() => setPayingStudent(null)} onPaid={handlePaymentMade} />
       )}
-
       {renewingStudent && (
-        <RenewalModal
-          student={renewingStudent}
-          onClose={() => setRenewingStudent(null)}
-          onRenewed={handleRenewed}
-        />
+        <RenewalModal student={renewingStudent} onClose={() => setRenewingStudent(null)} onRenewed={handleRenewed} />
       )}
-
       {deletingStudent && (
-        <DeleteConfirmModal
-          student={deletingStudent}
-          onClose={() => setDeletingStudent(null)}
-          onDeleted={handleDeleted}
-        />
+        <DeleteConfirmModal student={deletingStudent} onClose={() => setDeletingStudent(null)} onDeleted={handleDeleted} />
       )}
     </div>
   );

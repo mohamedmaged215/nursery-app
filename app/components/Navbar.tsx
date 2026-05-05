@@ -9,7 +9,6 @@ import { auth } from "../lib/firebase";
 const links = [
   { href: "/dashboard", label: "الرئيسية" },
   { href: "/students", label: "الطلاب" },
-  { href: "/buses", label: "العربيات" },
   { href: "/employees", label: "الموظفين" },
   { href: "/expenses", label: "المصاريف" },
   { href: "/reports", label: "التقارير" },
@@ -36,7 +35,7 @@ export default function Navbar() {
                 d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
             </svg>
           </div>
-          <span className="text-white font-bold text-base tracking-wide">حضانة شرق الكوبري</span>
+          <span className="text-white font-bold text-base tracking-wide">Mr Kids</span>
         </div>
       </div>
 

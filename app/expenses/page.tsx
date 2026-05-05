@@ -14,18 +14,10 @@ interface Expense {
   name: string;
   amount: number;
   date: string;
-  type: "salary" | "supplies" | "rent";
+  type: "supplies" | "rent";
   month: number; // 0-indexed
   year: number;
   createdAt: string;
-}
-
-interface Student {
-  id: string;
-  type: "street" | "bus";
-  area: string;
-  busAmount: number;
-  status: "active" | "inactive";
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -35,16 +27,12 @@ const ARABIC_MONTHS = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
 
-const BUS_AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"] as const;
-
 const TYPE_LABELS: Record<string, string> = {
-  salary:   "مرتبات",
   supplies: "هوالك",
   rent:     "إيجار",
 };
 
 const TYPE_BADGE: Record<string, string> = {
-  salary:   "bg-purple-100 text-purple-700",
   supplies: "bg-gray-100   text-gray-600",
   rent:     "bg-orange-100 text-orange-700",
 };
@@ -54,11 +42,6 @@ const TYPE_BADGE: Record<string, string> = {
 async function fetchExpenses(): Promise<Expense[]> {
   const snap = await getDocs(collection(db, "expenses"));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense));
-}
-
-async function fetchStudents(): Promise<Student[]> {
-  const snap = await getDocs(collection(db, "students"));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Student));
 }
 
 async function createExpense(data: Omit<Expense, "id">): Promise<string> {
@@ -97,7 +80,7 @@ function AddEditExpenseModal({
   const [amount, setAmount] = useState(expense?.amount ? String(expense.amount) : "");
   const [date,   setDate]   = useState(expense?.date ?? todayStr);
   const [type,   setType]   = useState<Expense["type"]>(
-    (expense?.type && expense.type in TYPE_LABELS) ? expense.type as Expense["type"] : "supplies"
+    (expense?.type === "rent") ? "rent" : "supplies"
   );
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState("");
@@ -106,8 +89,8 @@ function AddEditExpenseModal({
     e.preventDefault();
     setError("");
     const amt = Number(amount);
-    if (!name.trim())          { setError("يرجى إدخال البيان"); return; }
-    if (isNaN(amt) || amt <= 0){ setError("يرجى إدخال مبلغ صحيح"); return; }
+    if (!name.trim())           { setError("يرجى إدخال البيان"); return; }
+    if (isNaN(amt) || amt <= 0) { setError("يرجى إدخال مبلغ صحيح"); return; }
     if (!date)                  { setError("يرجى تحديد التاريخ"); return; }
 
     setSaving(true);
@@ -153,7 +136,7 @@ function AddEditExpenseModal({
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">النوع *</label>
             <div className="flex gap-2">
-              {(["salary", "supplies", "rent"] as const).map((t) => (
+              {(["supplies", "rent"] as const).map((t) => (
                 <button
                   key={t} type="button" onClick={() => setType(t)}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition border ${
@@ -168,35 +151,24 @@ function AddEditExpenseModal({
             </div>
           </div>
 
-          {/* Name */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">البيان *</label>
-            <input
-              type="text" required value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="اسم المصروف"
-              className={inputCls}
-            />
+            <input type="text" required value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="اسم المصروف" className={inputCls} />
           </div>
 
-          {/* Amount */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">المبلغ (جنيه) *</label>
-            <input
-              type="number" min="1" required dir="ltr"
+            <input type="number" min="1" required dir="ltr"
               value={amount} onChange={(e) => setAmount(e.target.value)}
-              placeholder="0" className={inputCls}
-            />
+              placeholder="0" className={inputCls} />
           </div>
 
-          {/* Date */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">التاريخ *</label>
-            <input
-              type="date" required dir="ltr"
+            <input type="date" required dir="ltr"
               value={date} onChange={(e) => setDate(e.target.value)}
-              className={inputCls}
-            />
+              className={inputCls} />
           </div>
 
           {error && (
@@ -267,7 +239,6 @@ export default function ExpensesPage() {
   const router = useRouter();
   const [authChecked, setAuthChecked]     = useState(false);
   const [expenses, setExpenses]           = useState<Expense[]>([]);
-  const [students, setStudents]           = useState<Student[]>([]);
   const [loading, setLoading]             = useState(true);
   const [showAdd, setShowAdd]             = useState(false);
   const [editing, setEditing]             = useState<Expense | null>(null);
@@ -289,11 +260,7 @@ export default function ExpensesPage() {
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!authChecked) return;
-    Promise.all([fetchExpenses(), fetchStudents()]).then(([e, s]) => {
-      setExpenses(e);
-      setStudents(s);
-      setLoading(false);
-    });
+    fetchExpenses().then((e) => { setExpenses(e); setLoading(false); });
   }, [authChecked]);
 
   // ── Month options ──────────────────────────────────────────────────────────
@@ -309,7 +276,7 @@ export default function ExpensesPage() {
       .sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month);
   }, [expenses]);
 
-  // ── Filtered manual expenses for selected month ────────────────────────────
+  // ── Filtered expenses for selected month ───────────────────────────────────
   const filtered = useMemo(
     () => expenses.filter((e) => e.month === selMonth && e.year === selYear),
     [expenses, selMonth, selYear]
@@ -320,31 +287,11 @@ export default function ExpensesPage() {
     count: filtered.length,
   }), [filtered]);
 
-  // ── Bus expenses by area (live snapshot of active bus students) ────────────
-  const busExpenses = useMemo(() => {
-    return BUS_AREAS.map((area) => {
-      const areaStudents = students.filter(
-        (s) => s.status === "active" && s.type === "bus" && s.area === area
-      );
-      return {
-        area,
-        count: areaStudents.length,
-        total: areaStudents.reduce((sum, s) => sum + (s.busAmount || 0), 0),
-      };
-    });
-  }, [students]);
-
-  const busTotalExpense = busExpenses.reduce((sum, b) => sum + b.total, 0);
-
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleExpenseSaved(expense: Expense) {
     setExpenses((prev) => {
       const idx = prev.findIndex((e) => e.id === expense.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = expense;
-        return next;
-      }
+      if (idx >= 0) { const next = [...prev]; next[idx] = expense; return next; }
       return [expense, ...prev];
     });
   }
@@ -399,8 +346,7 @@ export default function ExpensesPage() {
               value={`${selYear}-${selMonth}`}
               onChange={(e) => {
                 const [y, m] = e.target.value.split("-").map(Number);
-                setSelYear(y);
-                setSelMonth(m);
+                setSelYear(y); setSelMonth(m);
               }}
               className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
             >
@@ -445,12 +391,10 @@ export default function ExpensesPage() {
           </div>
         </div>
 
-        {/* ── Manual expenses table ────────────────────────────────────────── */}
+        {/* ── Expenses table ───────────────────────────────────────────────── */}
         {loading ? (
           <div className="space-y-3">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="bg-gray-100 rounded-xl h-14 animate-pulse" />
-            ))}
+            {[...Array(5)].map((_, i) => <div key={i} className="bg-gray-100 rounded-xl h-14 animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border border-gray-200">
@@ -458,9 +402,7 @@ export default function ExpensesPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
-            <p className="text-sm font-medium">
-              لا توجد مصاريف في {ARABIC_MONTHS[selMonth]} {selYear}
-            </p>
+            <p className="text-sm font-medium">لا توجد مصاريف في {ARABIC_MONTHS[selMonth]} {selYear}</p>
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -481,9 +423,7 @@ export default function ExpensesPage() {
                     .sort((a, b) => b.date.localeCompare(a.date))
                     .map((expense) => (
                       <tr key={expense.id} className="hover:bg-gray-50 transition">
-                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
-                          {expense.name}
-                        </td>
+                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{expense.name}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${TYPE_BADGE[expense.type] ?? "bg-gray-100 text-gray-600"}`}>
                             {TYPE_LABELS[expense.type] ?? "أخرى"}
@@ -492,21 +432,15 @@ export default function ExpensesPage() {
                         <td className="px-4 py-3 font-medium text-red-700 whitespace-nowrap">
                           {expense.amount.toLocaleString()} جنيه
                         </td>
-                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap" dir="ltr">
-                          {expense.date}
-                        </td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap" dir="ltr">{expense.date}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => setEditing(expense)}
-                              className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition"
-                            >
+                            <button onClick={() => setEditing(expense)}
+                              className="px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold hover:bg-blue-100 transition">
                               تعديل
                             </button>
-                            <button
-                              onClick={() => setDeleting(expense)}
-                              className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition"
-                            >
+                            <button onClick={() => setDeleting(expense)}
+                              className="px-2.5 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition">
                               حذف
                             </button>
                           </div>
@@ -518,91 +452,24 @@ export default function ExpensesPage() {
             </div>
             <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between text-xs text-gray-500">
               <span>{filtered.length} مصروف</span>
-              <span className="font-semibold text-red-700">
-                الإجمالي: {stats.total.toLocaleString()} جنيه
-              </span>
+              <span className="font-semibold text-red-700">الإجمالي: {stats.total.toLocaleString()} جنيه</span>
             </div>
           </div>
         )}
-
-        {/* ── Bus expenses — auto section ──────────────────────────────────── */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 bg-blue-50 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-blue-900">مصاريف العربيات (تلقائي)</h3>
-              <p className="text-xs text-blue-600 mt-0.5">محسوب من مبالغ عربيات الطلاب النشطين حالياً</p>
-            </div>
-            <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full">
-              قراءة فقط
-            </span>
-          </div>
-
-          {loading ? (
-            <div className="p-4 space-y-2">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="bg-gray-100 rounded-lg h-10 animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100 text-right">
-                  <th className="px-4 py-2.5 font-semibold text-gray-600 text-xs">المنطقة</th>
-                  <th className="px-4 py-2.5 font-semibold text-gray-600 text-xs">عدد الطلاب</th>
-                  <th className="px-4 py-2.5 font-semibold text-gray-600 text-xs">إجمالي العربيات</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {busExpenses.map(({ area, count, total }) => (
-                  <tr key={area} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 text-gray-800 font-medium">{area}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{count} طالب</td>
-                    <td className="px-4 py-2.5 font-semibold text-blue-700">
-                      {total.toLocaleString()} جنيه
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-gray-200 bg-blue-50">
-                  <td className="px-4 py-2.5 font-semibold text-gray-700 text-sm">
-                    الإجمالي ({busExpenses.reduce((s, b) => s + b.count, 0)} طالب)
-                  </td>
-                  <td />
-                  <td className="px-4 py-2.5 font-bold text-blue-700 text-sm">
-                    {busTotalExpense.toLocaleString()} جنيه
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          )}
-        </div>
-
       </main>
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}
       {showAdd && (
-        <AddEditExpenseModal
-          onClose={() => setShowAdd(false)}
-          onSave={(exp) => { handleExpenseSaved(exp); setShowAdd(false); }}
-        />
+        <AddEditExpenseModal onClose={() => setShowAdd(false)}
+          onSave={(exp) => { handleExpenseSaved(exp); setShowAdd(false); }} />
       )}
-
       {editing && (
-        <AddEditExpenseModal
-          expense={editing}
-          onClose={() => setEditing(null)}
-          onSave={(exp) => { handleExpenseSaved(exp); setEditing(null); }}
-        />
+        <AddEditExpenseModal expense={editing} onClose={() => setEditing(null)}
+          onSave={(exp) => { handleExpenseSaved(exp); setEditing(null); }} />
       )}
-
       {deleting && (
-        <DeleteConfirmModal
-          expense={deleting}
-          loading={actionLoading === deleting.id}
-          onConfirm={() => handleDelete(deleting)}
-          onClose={() => setDeleting(null)}
-        />
+        <DeleteConfirmModal expense={deleting} loading={actionLoading === deleting.id}
+          onConfirm={() => handleDelete(deleting)} onClose={() => setDeleting(null)} />
       )}
     </div>
   );

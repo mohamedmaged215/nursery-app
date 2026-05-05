@@ -5,8 +5,8 @@ import "./globals.css";
 const cairo = Cairo({ subsets: ["arabic", "latin"] });
 
 export const metadata: Metadata = {
-  title: "حضانة شرق الكوبري",
-  description: "نظام إدارة حضانة شرق الكوبري",
+  title: "Mr Kids",
+  description: "نظام إدارة Mr Kids",
 };
 
 export default function RootLayout({
