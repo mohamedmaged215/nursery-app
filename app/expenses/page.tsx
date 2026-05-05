@@ -35,7 +35,7 @@ const ARABIC_MONTHS = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
 
-const BUS_AREAS = ["شرق الكوبري", "البلدة", "العرب"] as const;
+const BUS_AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"] as const;
 
 const TYPE_LABELS: Record<string, string> = {
   salary:   "مرتبات",

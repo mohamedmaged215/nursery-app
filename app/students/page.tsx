@@ -35,7 +35,7 @@ interface Payment {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const DEFAULT_AREAS = ["شرق الكوبري", "البلدة", "العرب"];
+const DEFAULT_AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"];
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr);

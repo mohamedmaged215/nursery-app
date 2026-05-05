@@ -25,7 +25,7 @@ interface Student {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const AREAS = ["شرق الكوبري", "البلدة", "العرب"] as const;
+const AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"] as const;
 type Area = (typeof AREAS)[number];
 
 // ─── Firestore helpers ────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ export default function BusesPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [students, setStudents]       = useState<Student[]>([]);
   const [loading, setLoading]         = useState(true);
-  const [activeArea, setActiveArea]   = useState<Area>("شرق الكوبري");
+  const [activeArea, setActiveArea]   = useState<Area>("عربية عم سعيد");
 
   // ── Auth guard ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -65,9 +65,9 @@ export default function BusesPage() {
   // ── Derived data ───────────────────────────────────────────────────────────
   const busByArea = useMemo(() => {
     const map: Record<Area, Student[]> = {
-      "شرق الكوبري": [],
-      "البلدة": [],
-      "العرب": [],
+      "عربية عم سعيد": [],
+      "عربية أبو الشيخ": [],
+      "توكتوك العرب": [],
     };
     for (const s of students) {
       if (s.type === "bus" && s.status === "active" && s.area in map) {

@@ -42,7 +42,7 @@ const ARABIC_MONTHS = [
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
 
-const AREAS = ["شرق الكوبري", "البلدة", "العرب"];
+const AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"];
 
 const ROLE_LABELS: Record<Employee["role"], string> = {
   teacher: "معلمة",
