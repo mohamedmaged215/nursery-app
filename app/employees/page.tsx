@@ -27,22 +27,12 @@ interface Salary {
   date: string;
 }
 
-interface Student {
-  id: string;
-  type: "street" | "bus";
-  area: string;
-  busAmount: number;
-  status: "active" | "inactive";
-}
-
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const ARABIC_MONTHS = [
   "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
 ];
-
-const AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"];
 
 const ROLE_LABELS: Record<Employee["role"], string> = {
   teacher: "معلمة",
@@ -77,11 +67,6 @@ async function fetchSalaries(): Promise<Salary[]> {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Salary));
 }
 
-async function fetchStudents(): Promise<Student[]> {
-  const snap = await getDocs(collection(db, "students"));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Student));
-}
-
 async function createSalary(data: Omit<Salary, "id">): Promise<string> {
   const ref = await addDoc(collection(db, "salaries"), data);
   return ref.id;
@@ -101,7 +86,6 @@ function AddEditEmployeeModal({
   const isEdit = !!employee;
   const [name, setName] = useState(employee?.name ?? "");
   const [role, setRole] = useState<Employee["role"]>(employee?.role ?? "teacher");
-  const [area, setArea] = useState(employee?.area || AREAS[0]);
   const [monthlySalary, setMonthlySalary] = useState(
     employee?.monthlySalary ? String(employee.monthlySalary) : ""
   );
@@ -119,7 +103,7 @@ function AddEditEmployeeModal({
       const patch = {
         name: name.trim(),
         role,
-        area: role === "driver" ? area : "",
+        area: "",
         monthlySalary: salary,
       };
       if (isEdit && employee) {
@@ -181,15 +165,6 @@ function AddEditEmployeeModal({
               ))}
             </div>
           </div>
-
-          {role === "driver" && (
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">المنطقة *</label>
-              <select value={area} onChange={(e) => setArea(e.target.value)} className={inputCls}>
-                {AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-          )}
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">المرتب الشهري (جنيه) *</label>
@@ -259,10 +234,6 @@ function EmployeeDetailsModal({
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
             <span className="text-gray-500">الوظيفة</span>
             <span className="font-medium text-gray-700">{ROLE_LABELS[employee.role]}</span>
-            {employee.role === "driver" && employee.area && <>
-              <span className="text-gray-500">المنطقة</span>
-              <span className="font-medium text-gray-700">{employee.area}</span>
-            </>}
             <span className="text-gray-500">المرتب الشهري</span>
             <span className="font-medium text-gray-700">{employee.monthlySalary.toLocaleString()} ج</span>
             <span className="text-gray-500">تاريخ الإضافة</span>
@@ -371,7 +342,6 @@ function SalaryModal({
           <p className="text-sm font-semibold text-gray-900">{employee.name}</p>
           <p className="text-xs text-gray-500 mt-0.5">
             {ROLE_LABELS[employee.role]}
-            {employee.role === "driver" && employee.area ? ` · ${employee.area}` : ""}
             {" · "}المرتب الأساسي: {employee.monthlySalary.toLocaleString()} جنيه
           </p>
         </div>
@@ -476,7 +446,6 @@ export default function EmployeesPage() {
   const [authChecked, setAuthChecked]     = useState(false);
   const [employees, setEmployees]         = useState<Employee[]>([]);
   const [salaries, setSalaries]           = useState<Salary[]>([]);
-  const [students, setStudents]           = useState<Student[]>([]);
   const [loading, setLoading]             = useState(true);
   const [showAdd, setShowAdd]             = useState(false);
   const [editing, setEditing]             = useState<Employee | null>(null);
@@ -500,10 +469,9 @@ export default function EmployeesPage() {
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!authChecked) return;
-    Promise.all([fetchEmployees(), fetchSalaries(), fetchStudents()]).then(([e, s, st]) => {
+    Promise.all([fetchEmployees(), fetchSalaries()]).then(([e, s]) => {
       setEmployees(e);
       setSalaries(s);
-      setStudents(st);
       setLoading(false);
     });
   }, [authChecked]);
@@ -543,22 +511,6 @@ export default function EmployeesPage() {
     }
     return map;
   }, [employees, salaries, selMonth, selYear]);
-
-  // ── Driver stats: bus collected vs salary paid ─────────────────────────────
-  const driverStats = useMemo(() => {
-    const result: Record<string, { busCollected: number; salariedThisMonth: number }> = {};
-    for (const emp of employees) {
-      if (emp.role !== "driver") continue;
-      const busCollected = students
-        .filter((s) => s.status === "active" && s.type === "bus" && s.area === emp.area)
-        .reduce((sum, s) => sum + (s.busAmount || 0), 0);
-      const salariedThisMonth = salaries
-        .filter((s) => s.employeeId === emp.id && s.month === selMonth && s.year === selYear)
-        .reduce((sum, s) => sum + s.amount, 0);
-      result[emp.id] = { busCollected, salariedThisMonth };
-    }
-    return result;
-  }, [employees, students, salaries, selMonth, selYear]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleEmployeeSaved(emp: Employee) {
@@ -702,7 +654,6 @@ export default function EmployeesPage() {
                   <tr className="bg-gray-50 border-b border-gray-200 text-right">
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الاسم</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">الوظيفة</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المنطقة</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المرتب المستحق</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المدفوع</th>
                     <th className="px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">المتبقي</th>
@@ -711,8 +662,6 @@ export default function EmployeesPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {employees.map((emp) => {
-                    const ds = driverStats[emp.id];
-                    const diff = ds ? ds.busCollected - ds.salariedThisMonth : 0;
                     const empPaid = empSalaryMap[emp.id]?.paid ?? 0;
                     const empRemaining = Math.max(0, emp.monthlySalary - empPaid);
                     const isComplete = empRemaining === 0;
@@ -731,9 +680,6 @@ export default function EmployeesPage() {
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_BADGE[emp.role]}`}>
                               {ROLE_LABELS[emp.role]}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                            {emp.role === "driver" && emp.area ? emp.area : "—"}
                           </td>
                           <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">
                             {emp.monthlySalary.toLocaleString()} ج
@@ -774,36 +720,6 @@ export default function EmployeesPage() {
                           </td>
                         </tr>
 
-                        {/* ── Driver salary split row ────────────────────── */}
-                        {emp.role === "driver" && ds && (
-                          <tr key={`${emp.id}-driver`} className="bg-blue-50/40 border-b border-blue-100">
-                            <td colSpan={7} className="px-4 py-2.5">
-                              <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
-                                <span>
-                                  <span className="text-gray-500">محصل من طلاب {emp.area}:</span>
-                                  <span className="font-bold text-blue-700 mr-1">
-                                    {ds.busCollected.toLocaleString()} ج
-                                  </span>
-                                </span>
-                                <span>
-                                  <span className="text-gray-500">المرتب المدفوع ({ARABIC_MONTHS[selMonth]}):</span>
-                                  <span className="font-bold text-red-700 mr-1">
-                                    {ds.salariedThisMonth.toLocaleString()} ج
-                                  </span>
-                                </span>
-                                <span>
-                                  <span className="text-gray-500">الفرق:</span>
-                                  <span className={`font-bold mr-1 ${diff >= 0 ? "text-green-700" : "text-red-700"}`}>
-                                    {diff >= 0 ? "+" : ""}{diff.toLocaleString()} ج
-                                  </span>
-                                  <span className={`font-medium ${diff >= 0 ? "text-green-600" : "text-red-600"}`}>
-                                    ({diff >= 0 ? "ربح" : "خسارة"} على العربية)
-                                  </span>
-                                </span>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
                       </>
                     );
                   })}
