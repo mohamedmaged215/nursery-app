@@ -35,12 +35,7 @@ interface Payment {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TYPE_OPTIONS = [
-  { value: "street", label: "بدون مواصلات" },
-  { value: "bus",    label: "عربية عم سعيد" },
-  { value: "bus2",   label: "عربية أبو الشيخ" },
-  { value: "bus3",   label: "توكتوك العرب" },
-] as const;
+const BUS_AREAS = ["عربية عم سعيد", "عربية أبو الشيخ", "توكتوك العرب"] as const;
 
 // Display label for a student's transport type
 function typeLabel(s: Student): string {
@@ -150,16 +145,13 @@ function AddEditStudentModal({
   const isEdit = !!student;
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  // Determine initial transport value from existing student
-  const initialTransport = (() => {
-    if (!student) return "street";
-    if (student.type === "street") return "street";
-    return student.area || "عربية عم سعيد";
-  })();
+  const initialIsBus = student ? student.type === "bus" : false;
+  const initialArea  = (student?.type === "bus" && student.area) ? student.area : BUS_AREAS[0];
 
   const [name, setName] = useState(student?.name ?? "");
   const [phone, setPhone] = useState(student?.phone ?? "");
-  const [transport, setTransport] = useState<string>(initialTransport);
+  const [isBus, setIsBus] = useState(initialIsBus);
+  const [busArea, setBusArea] = useState<string>(initialArea);
   const [subscriptionAmount, setSubscriptionAmount] = useState(
     student?.subscriptionAmount ? String(student.subscriptionAmount) : ""
   );
@@ -167,9 +159,8 @@ function AddEditStudentModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const isBus = transport !== "street";
   const effectiveType: "street" | "bus" = isBus ? "bus" : "street";
-  const effectiveArea = isBus ? transport : "";
+  const effectiveArea = isBus ? busArea : "";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -249,18 +240,25 @@ function AddEditStudentModal({
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">نوع الاشتراك</label>
-            <div className="grid grid-cols-2 gap-2">
-              {TYPE_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button" onClick={() => setTransport(opt.value)}
-                  className={`py-2 rounded-lg text-sm font-medium transition border ${
-                    transport === opt.value
-                      ? "bg-[#1976d2] text-white border-[#1976d2]"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-                  }`}>
-                  {opt.label}
-                </button>
-              ))}
+            <div className="flex gap-2 mb-2">
+              <button type="button" onClick={() => setIsBus(false)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition border ${
+                  !isBus ? "bg-[#1976d2] text-white border-[#1976d2]" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}>
+                بدون مواصلات
+              </button>
+              <button type="button" onClick={() => setIsBus(true)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition border ${
+                  isBus ? "bg-[#1976d2] text-white border-[#1976d2]" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}>
+                عربية
+              </button>
             </div>
+            {isBus && (
+              <select value={busArea} onChange={(e) => setBusArea(e.target.value)} className={inputCls}>
+                {BUS_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            )}
           </div>
 
           <div>
@@ -504,15 +502,17 @@ function RenewalModal({
   onClose: () => void;
   onRenewed: (id: string, sub: number, type: "street" | "bus", area: string) => void;
 }) {
-  const initialTransport = student.type === "street" ? "street" : (student.area || "عربية عم سعيد");
   const [subAmount, setSubAmount] = useState(String(student.subscriptionAmount || ""));
-  const [transport, setTransport] = useState<string>(initialTransport);
+  const [isBus, setIsBus]   = useState(student.type === "bus");
+  const [busArea, setBusArea] = useState<string>(
+    (student.type === "bus" && student.area) ? student.area : BUS_AREAS[0]
+  );
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState("");
 
   const sub = Number(subAmount) || 0;
-  const effectiveType: "street" | "bus" = transport === "street" ? "street" : "bus";
-  const effectiveArea = transport === "street" ? "" : transport;
+  const effectiveType: "street" | "bus" = isBus ? "bus" : "street";
+  const effectiveArea = isBus ? busArea : "";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -551,18 +551,25 @@ function RenewalModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">نوع الاشتراك</label>
-            <div className="grid grid-cols-2 gap-2">
-              {TYPE_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button" onClick={() => setTransport(opt.value)}
-                  className={`py-2 rounded-lg text-sm font-medium transition border ${
-                    transport === opt.value
-                      ? "bg-[#1976d2] text-white border-[#1976d2]"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-                  }`}>
-                  {opt.label}
-                </button>
-              ))}
+            <div className="flex gap-2 mb-2">
+              <button type="button" onClick={() => setIsBus(false)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition border ${
+                  !isBus ? "bg-[#1976d2] text-white border-[#1976d2]" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}>
+                بدون مواصلات
+              </button>
+              <button type="button" onClick={() => setIsBus(true)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition border ${
+                  isBus ? "bg-[#1976d2] text-white border-[#1976d2]" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                }`}>
+                عربية
+              </button>
             </div>
+            {isBus && (
+              <select value={busArea} onChange={(e) => setBusArea(e.target.value)} className={inputCls}>
+                {BUS_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            )}
           </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">مبلغ الاشتراك الجديد (جنيه) *</label>
@@ -656,6 +663,94 @@ function DeleteConfirmModal({
   );
 }
 
+// ─── Bus Group Modal ──────────────────────────────────────────────────────────
+
+function BusGroupModal({
+  area,
+  students,
+  onClose,
+}: {
+  area: string;
+  students: Student[];
+  onClose: () => void;
+}) {
+  const areaStudents = students.filter(
+    (s) => s.type === "bus" && s.area === area && s.status === "active"
+  );
+  const totalSub  = areaStudents.reduce((sum, s) => sum + s.subscriptionAmount, 0);
+  const totalPaid = areaStudents.reduce((sum, s) => sum + s.paidAmount, 0);
+  const totalRem  = areaStudents.reduce((sum, s) => sum + s.remainingAmount, 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 py-6 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 my-auto">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">{area}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{areaStudents.length} طالب نشط</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {areaStudents.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-8">لا يوجد طلاب نشطين في هذه العربية</p>
+        ) : (
+          <>
+            <div className="border border-gray-200 rounded-xl overflow-hidden mb-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-right">
+                    <th className="px-3 py-2 font-semibold text-gray-600 text-xs">الاسم</th>
+                    <th className="px-3 py-2 font-semibold text-gray-600 text-xs">الاشتراك</th>
+                    <th className="px-3 py-2 font-semibold text-gray-600 text-xs">المدفوع</th>
+                    <th className="px-3 py-2 font-semibold text-gray-600 text-xs">الباقي</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {areaStudents.map((s) => (
+                    <tr key={s.id}>
+                      <td className="px-3 py-2 font-medium text-gray-800 text-xs">{s.name}</td>
+                      <td className="px-3 py-2 text-gray-700 text-xs">{s.subscriptionAmount.toLocaleString()} ج</td>
+                      <td className="px-3 py-2 text-green-700 font-medium text-xs">{s.paidAmount.toLocaleString()} ج</td>
+                      <td className={`px-3 py-2 font-medium text-xs ${s.remainingAmount > 0 ? "text-orange-600" : "text-green-600"}`}>
+                        {s.remainingAmount.toLocaleString()} ج
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-gray-50 rounded-xl px-3 py-3 text-center">
+                <p className="text-xs text-gray-500 mb-1">إجمالي الاشتراكات</p>
+                <p className="text-sm font-bold text-gray-900">{totalSub.toLocaleString()} ج</p>
+              </div>
+              <div className="bg-green-50 rounded-xl px-3 py-3 text-center">
+                <p className="text-xs text-gray-500 mb-1">إجمالي المدفوع</p>
+                <p className="text-sm font-bold text-green-700">{totalPaid.toLocaleString()} ج</p>
+              </div>
+              <div className="bg-orange-50 rounded-xl px-3 py-3 text-center">
+                <p className="text-xs text-gray-500 mb-1">إجمالي الباقي</p>
+                <p className="text-sm font-bold text-orange-600">{totalRem.toLocaleString()} ج</p>
+              </div>
+            </div>
+          </>
+        )}
+
+        <button onClick={onClose}
+          className="w-full py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition">
+          إغلاق
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function StudentsPage() {
@@ -671,6 +766,7 @@ export default function StudentsPage() {
   const [payingStudent, setPayingStudent]     = useState<Student | null>(null);
   const [renewingStudent, setRenewingStudent] = useState<Student | null>(null);
   const [deletingStudent, setDeletingStudent] = useState<Student | null>(null);
+  const [viewingBusArea, setViewingBusArea]   = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -838,11 +934,18 @@ export default function StudentsPage() {
                         </td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap" dir="ltr">{student.phone}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            student.type === "bus" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"
-                          }`}>
-                            {typeLabel(student)}
-                          </span>
+                          {student.type === "bus" ? (
+                            <button
+                              onClick={() => setViewingBusArea(student.area)}
+                              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 underline transition"
+                            >
+                              {typeLabel(student)}
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                              {typeLabel(student)}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-900 whitespace-nowrap">
                           {student.subscriptionAmount.toLocaleString()}
@@ -923,6 +1026,9 @@ export default function StudentsPage() {
       )}
       {deletingStudent && (
         <DeleteConfirmModal student={deletingStudent} onClose={() => setDeletingStudent(null)} onDeleted={handleDeleted} />
+      )}
+      {viewingBusArea && (
+        <BusGroupModal area={viewingBusArea} students={students} onClose={() => setViewingBusArea(null)} />
       )}
     </div>
   );
