@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useRouter } from "next/navigation";
+import { useAuthStatus } from "./lib/auth";
 import { auth } from "./lib/firebase";
+import { Spinner } from "./components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,6 +13,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const status = useAuthStatus();
+
+  // لو المستخدم مسجل دخول أصلًا (أو لسه داخل حالًا) نحوّله للرئيسية على طول.
+  useEffect(() => {
+    if (status === "in") router.replace("/dashboard");
+  }, [status, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,13 +26,14 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      router.push("/dashboard");
+      // التحويل للرئيسية بيحصل من الـ effect فوق أول ما الحالة تبقى "in".
     } catch {
       setError("البريد الإلكتروني أو كلمة المرور غير صحيحة. حاول مرة أخرى.");
-    } finally {
       setLoading(false);
     }
   }
+
+  if (status !== "out") return <Spinner />;
 
   return (
     <div className="min-h-full flex flex-col">

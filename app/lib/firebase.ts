@@ -1,6 +1,12 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  type Auth,
+} from "firebase/auth";
+// النسخة الخفيفة من Firestore: كفاية للقراءة والكتابة العادية وحجمها أصغر بكتير.
+import { getFirestore } from "firebase/firestore/lite";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBedWvr55EqluPJ-Fcwz3Lqn2B0jIrk6Ac",
@@ -12,5 +18,12 @@ const firebaseConfig = {
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-export const auth = getAuth(app);
+
+// initializeAuth بدل getAuth: الدخول هنا بالإيميل وكلمة المرور بس، فمش محتاجين كود
+// الدخول بـ popup/redirect (أخف، ومش بيحمّل سكربت إضافي من جوجل على الموبايل).
+// الجلسة بتتحفظ في نفس المكان (IndexedDB) فالمستخدم بيفضل مسجل دخوله.
+const globalAuth = globalThis as typeof globalThis & { __nurseryAuth?: Auth };
+export const auth = (globalAuth.__nurseryAuth ??= initializeAuth(app, {
+  persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+}));
 export const db = getFirestore(app);

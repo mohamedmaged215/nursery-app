@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { auth } from "../lib/firebase";
+import { useData } from "../lib/store";
 
 const links = [
   { href: "/dashboard", label: "الرئيسية" },
@@ -17,6 +18,7 @@ const links = [
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { refresh, refreshing } = useData();
   const [menuOpen, setMenuOpen] = useState(false);
 
   async function handleLogout() {
@@ -60,8 +62,24 @@ export default function Navbar() {
             })}
           </nav>
 
-          {/* Mobile: subtitle + hamburger */}
+          {/* Mobile: subtitle */}
           <span className="sm:hidden text-white/80 text-xs font-medium flex-1">نظام إدارة الحضانة</span>
+
+          {/* Refresh data */}
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            title="تحديث البيانات"
+            aria-label="تحديث البيانات"
+            className="p-1.5 rounded text-white/80 hover:text-white hover:bg-white/10 transition disabled:opacity-60"
+          >
+            <svg className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+
+          {/* Mobile hamburger */}
           <button
             onClick={() => setMenuOpen((o) => !o)}
             className="sm:hidden p-1.5 rounded text-white/80 hover:text-white hover:bg-white/10 transition"
